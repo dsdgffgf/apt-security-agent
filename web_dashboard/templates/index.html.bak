@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>APT 攻击模拟管理系统</title>
+<style>
+  :root {
+    --bg: #0a0e14;
+    --panel: #131820;
+    --border: #1e2a3a;
+    --text: #c8ccd4;
+    --text-dim: #6b7380;
+    --accent: #39bae6;
+    --accent2: #ff8f40;
+    --danger: #f26d78;
+    --ok: #7fd962;
+    --warn: #e5b567;
+    --card-a: #1a2332;
+    --card-b: #1a2318;
+    --card-c: #23181a;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: "SF Mono", "Consolas", "Microsoft YaHei", monospace;
+    background: var(--bg); color: var(--text);
+    min-height: 100vh;
+  }
+
+  /* ── Header ── */
+  .header {
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 28px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .header h1 { font-size: 18px; font-weight: 600; letter-spacing: 1px; }
+  .header .badge { font-size: 11px; color: var(--ok); background: #7fd96215; padding:4px 10px; border-radius: 10px; }
+
+  /* ── Layout ── */
+  .main { max-width: 1400px; margin: 0 auto; padding: 24px; }
+  .section-title { font-size: 13px; color: var(--text-dim); margin: 28px 0 14px; text-transform: uppercase; letter-spacing: 2px; }
+
+  /* ── Vector Cards ── */
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 20px; transition: border-color .2s;
+  }
+  .card:hover { border-color: var(--accent); }
+  .card .card-letter { font-size: 36px; font-weight: 800; margin-bottom: 6px; }
+  .card .card-label { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+  .card .card-desc { font-size: 12px; color: var(--text-dim); margin-bottom: 10px; }
+  .card .card-phases { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 14px; }
+  .card .card-phases span {
+    font-size: 10px; background: #ffffff0a; border-radius: 4px; padding: 3px 7px;
+    color: var(--text-dim);
+  }
+  .card .card-target { font-size: 11px; color: var(--text-dim); margin-bottom: 6px; }
+  .card input {
+    width: 100%; padding: 8px 10px; font-size: 13px; background: var(--bg);
+    border: 1px solid var(--border); border-radius: 6px; color: var(--text);
+    font-family: inherit; margin-bottom: 8px;
+  }
+  .card input:focus { outline: none; border-color: var(--accent); }
+  .card button {
+    width: 100%; padding: 9px; font-size: 13px; font-weight: 600;
+    border: none; border-radius: 6px; cursor: pointer; font-family: inherit;
+    transition: opacity .2s;
+  }
+  .card button:hover { opacity: 0.85; }
+  .card button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .card-a .card-letter { color: var(--accent); }
+  .card-a button { background: var(--accent); color: #000; }
+  .card-b .card-letter { color: var(--ok); }
+  .card-b button { background: var(--ok); color: #000; }
+  .card-c .card-letter { color: var(--accent2); }
+  .card-c button { background: var(--accent2); color: #000; }
+
+  /* ── Progress panel ── */
+  .progress-panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 0; margin-top: 24px; display: none; overflow: hidden;
+  }
+  .progress-panel.active { display: block; }
+
+  .progress-header {
+    padding: 14px 20px; border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .progress-header .task-info { font-size: 13px; }
+  .progress-header .task-status { font-size: 12px; padding: 4px 10px; border-radius: 10px; }
+  .status-running { background: #39bae620; color: var(--accent); }
+  .status-done { background: #7fd96220; color: var(--ok); }
+  .status-failed { background: #f26d7820; color: var(--danger); }
+
+  .progress-body { padding: 14px 20px; max-height: 420px; overflow-y: auto; }
+  .phase-bar { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+  .phase-dot {
+    font-size: 10px; padding: 5px 10px; border-radius: 12px;
+    background: #ffffff05; color: var(--text-dim); border: 1px solid transparent;
+    transition: all .3s;
+  }
+  .phase-dot.active { background: var(--accent); color: #000; border-color: var(--accent); }
+  .phase-dot.done { background: #7fd96220; color: var(--ok); border-color: var(--ok); }
+  .phase-dot.failed { background: #f26d7820; color: var(--danger); border-color: var(--danger); }
+
+  .log-line { font-size: 12px; color: var(--text-dim); padding: 2px 0; font-family: inherit; white-space: pre-wrap; word-break: break-all; }
+  .log-line.warn { color: var(--warn); }
+  .log-line.err { color: var(--danger); }
+  .phase-findings { margin: 8px 0 12px; padding-left: 14px; }
+  .phase-findings li { font-size: 11px; color: var(--text-dim); padding: 1px 0; }
+
+  .awareness-bar { margin-top: 10px; }
+  .awareness-label { font-size: 11px; color: var(--text-dim); margin-bottom: 4px; }
+  .awareness-track {
+    height: 6px; background: #ffffff0a; border-radius: 3px; overflow: hidden;
+  }
+  .awareness-fill {
+    height: 100%; border-radius: 3px; transition: width .5s, background .5s;
+    width: 0%; background: var(--ok);
+  }
+  .awareness-fill.medium { background: var(--warn); }
+  .awareness-fill.high { background: var(--danger); }
+
+  /* ── Report modal ── */
+  .report-btn { margin-left: auto; font-size: 11px; padding: 4px 10px; border:1px solid var(--accent); border-radius: 6px; background: none; color: var(--accent); cursor: pointer; font-family: inherit; }
+  .report-btn:hover { background: var(--accent); color: #000; }
+  .modal-overlay { display:none; position:fixed; inset:0; background:#000000aa; z-index:100; justify-content:center; align-items:flex-start; padding-top:40px; }
+  .modal-overlay.show { display:flex; }
+  .modal {
+    background: var(--panel); border:1px solid var(--border); border-radius:12px;
+    width:90vw; max-width:900px; max-height:80vh; overflow-y:auto; padding:24px;
+  }
+  .modal h2 { font-size:16px; margin-bottom:16px; }
+  .modal pre { font-size:12px; color:var(--text-dim); white-space:pre-wrap; font-family:inherit; line-height:1.6; }
+  .modal .close-btn {
+    position:sticky; top:0; float:right; background:none; border:1px solid var(--border);
+    color:var(--text); padding:4px 12px; border-radius:6px; cursor:pointer; font-size:14px;
+  }
+  .modal .close-btn:hover { background:var(--danger); border-color:var(--danger); }
+
+  /* ── History ── */
+  .history { margin-top: 24px; }
+  .history-table { width:100%; border-collapse:collapse; font-size:12px; }
+  .history-table th { text-align:left; padding:8px 12px; color:var(--text-dim); border-bottom:1px solid var(--border); font-weight:500; }
+  .history-table td { padding:8px 12px; border-bottom:1px solid #ffffff05; }
+  .history-table .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
+  .history-table .dot.running { background: var(--accent); }
+  .history-table .dot.done { background: var(--ok); }
+  .history-table .dot.failed { background: var(--danger); }
+
+  .empty-state { text-align:center; padding:40px; color:var(--text-dim); font-size:13px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>⚔ APT 攻击模拟管理系统</h1>
+  <div style="display:flex;align-items:center;gap:12px">
+    <span class="badge" id="connStatus" style="color:var(--danger)">● REAL 模式</span>
+  </div>
+</div>
+</div>
+
+<div class="main">
+
+  <!-- 三向量卡片 -->
+  <div class="cards" id="cards">
+    {% for v in vectors %}
+    <div class="card card-{{ v.letter.lower() }}">
+      <div class="card-letter">{{ v.emoji }} {{ v.letter }}</div>
+      <div class="card-label">{{ v.label }}</div>
+      <div class="card-desc">适用目标：{{ v.prime_target }}</div>
+      <div class="card-phases">
+        {% for p in v.phases %}<span>{{ p }}</span>{% endfor %}
+        <span>→ 报告</span>
+      </div>
+      <input type="text" id="target-{{ v.key }}" placeholder="输入目标 IP/域名">
+      {% if v.key == 'supply_chain' %}
+      <div style="text-align:center; color:var(--text-dim); font-size:11px; padding:2px 0">&#8595; 通过已控跳板攻击下游 &#8595;</div>
+      <input type="text" id="cross-{{ v.key }}" placeholder="下游目标 (丙方)">
+      {% endif %}
+      <button id="btn-{{ v.key }}" onclick="launchSim('{{ v.key }}')">
+        启动 {{ v.letter }} 向量攻击
+      </button>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- 进度面板 -->
+  <div class="progress-panel" id="progressPanel">
+    <div class="progress-header">
+      <span class="task-info" id="taskInfo">—</span>
+      <button class="report-btn" id="reportBtn" style="display:none" onclick="showReport()">查看报告</button>
+      <span class="task-status" id="taskStatus">—</span>
+    </div>
+    <div class="progress-body" id="progressBody">
+      <div class="phase-bar" id="phaseBar"></div>
+      <div id="logArea"></div>
+      <div class="awareness-bar" id="awarenessBar" style="display:none">
+        <div class="awareness-label">蓝队感知度: <span id="awarenessVal">0/100</span></div>
+        <div class="awareness-track"><div class="awareness-fill" id="awarenessFill"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 历史记录 -->
+  <div class="section-title">📋 执行历史</div>
+  <div class="history">
+    <table class="history-table" id="historyTable">
+      <thead><tr><th>时间</th><th>向量</th><th>目标</th><th>模式</th><th>状态</th></tr></thead>
+      <tbody id="historyBody"><tr><td colspan="5" class="empty-state">暂无记录</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- 报告模态框 -->
+<div class="modal-overlay" id="reportOverlay" onclick="closeReport(event)">
+  <div class="modal" id="reportModal">
+    <button class="close-btn" onclick="closeReport()">✕ 关闭</button>
+    <h2 id="reportTitle"></h2>
+    <pre id="reportContent"></pre>
+  </div>
+</div>
+
+<script>
+let currentJob = null;
+let currentReport = null;
+let eventSource = null;
+let useRealMode = true;
+
+function toggleMode() {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');

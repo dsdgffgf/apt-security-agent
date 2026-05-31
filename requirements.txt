@@ -1,0 +1,12 @@
+
+# 安全日志分析系统 - 全部依赖
+# Python >= 3.10
+# 安装方式: conda env create -f environment.yml
+#       或: conda create -n security-log-analyzer python=3.13 && conda activate security-log-analyzer && pip install -r requirements.txt
+
+httpx>=0.27
+qwen-agent>=0.0.30
+python-pptx>=1.0
+paramiko>=3.0
+flask>=3.0
+waitress>=3.0
