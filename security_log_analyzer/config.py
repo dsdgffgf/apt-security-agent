@@ -1,6 +1,16 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+
+# 自动加载项目根目录 .env 文件（不提交到 git）
+_dotenv_path = Path(__file__).resolve().parent.parent / ".env"
+if _dotenv_path.exists():
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(_dotenv_path)
+    except ImportError:
+        pass
 
 
 # DeepSeek configuration (primary)
