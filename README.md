@@ -85,18 +85,44 @@ python web_dashboard/app.py
 
 | 向量 | 说明 |
 |------|------|
-| `firewall` | 互联网边界突破 — 端口扫描→服务探测→漏洞利用→初始接入 |
-| `supply` | 供应链跳板 — 以目标为跳板攻击下游，实现横向移动 |
-| `phishing` | 社工钓鱼 — 邮件/对话场景生成，社工工程学攻击 |
+| `firewall` | **互联网边界突破** — 动态攻击方案生成 → 工具缓存复用 → 漏洞利用 → 初始接入 |
+| `supply` | **供应链跳板** — 6种横向移动技术（PsExec/WMI/计划任务/哈希传递/SSH密钥复用/端口转发） → 自动降级 → 内网资产发现 |
+| `phishing` | **社工钓鱼闭环** — 钓鱼邮件 + VBA宏附件生成 + C2 回传监听 → 完整控制设备模拟 |
+
+#### 模式A：互联网边界突破（firewall）改进
+
+1. **动态攻击方案生成**：不再使用硬编码攻击流程。智能体先分析 RECON 阶段收集的目标特征（端口、服务版本、Web认证机制、CVE），自动输出最优攻击方案。
+2. **工具缓存复用**：基于 `工具名 + 目标特征hash` 生成唯一签名，相同签名的工具调用直接返回缓存结果，避免重复 LLM 生成，节省 token。
+
+#### 模式B：供应链跳板（supply）改进
+
+1. **6种横向移动技术**：`apt_psexec` / `apt_wmi_exec` / `apt_schtasks` / `apt_pass_the_hash` / `apt_ssh_key_reuse` / `apt_port_forward`
+2. **自动降级策略**：PsExec 失败 → 尝试 WMI → 失败 → 尝试计划任务 → 失败 → 尝试 SSH 密钥复用。每种失败原因记录到 `state.notes`。
+3. **内网资产发现**：通过 `apt_internal_scan` 从跳板扫描内网存活主机（支持 nmap SSH 远程执行 / Python socket 本地回退）。
+
+#### 模式C：社工钓鱼（phishing）改进
+
+1. **VBA 宏附件生成**：`generate_macro_doc()` 生成 .xlsm/.docm 文件，内含 VBA 宏代码。宏功能（无害）：获取主机名、用户名、内网IP，通过 HTTP POST 回传 C2 服务器。
+2. **C2 监听器**：`security_log_analyzer/c2_listener.py` — `GET /payload.ps1` 返回测试脚本，`POST /capture` 接收回调信息，`GET /` 显示实时状态页面。
+3. **完整闭环**：SOCIAL_ENG 阶段自动生成钓鱼邮件 + 宏附件 → C2 URL 注入 → 等待宏执行回传。
+
+#### 启动 C2 监听器
+
+```bash
+python -m security_log_analyzer.c2_listener --host 0.0.0.0 --port 8080
+```
+
+
 
 ### 目录结构
 
 ```
 ├── security_log_analyzer/   # 核心分析引擎
-│   ├── apt_core.py          # APT 仿真核心编排
-│   ├── apt_tools.py         # 攻击工具集
+│   ├── apt_core.py          # APT 仿真核心编排（含 plan_attack 动态方案 + 多技术横向移动）
+│   ├── apt_tools.py         # 攻击工具集（含 TOOL_CACHE 缓存 + 宏生成 + 6种横向移动）
+│   ├── c2_listener.py       # C2 回传监听器（社工钓鱼）
 │   ├── agent.py             # LLM Agent 封装
-│   ├── config.py            # API 配置（自动加载 .env）
+│   ├── config.py            # API 配置（含 C2_HOST/C2_PORT）
 │   └── __main__.py          # CLI 入口
 ├── web_dashboard/           # Web 管理面板
 │   ├── app.py               # Flask 后端

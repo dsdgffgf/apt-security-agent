@@ -151,8 +151,52 @@
   .history-table .dot.running { background: var(--accent); }
   .history-table .dot.done { background: var(--ok); }
   .history-table .dot.failed { background: var(--danger); }
+  .history-table tr.clickable { cursor: pointer; transition: background .15s; }
+  .history-table tr.clickable:hover { background: #39bae610; }
 
   .empty-state { text-align:center; padding:40px; color:var(--text-dim); font-size:13px; }
+
+  /* ── C2 Panel ── */
+  .c2-panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    margin-top: 24px; overflow: hidden;
+  }
+  .c2-header {
+    padding: 14px 20px; border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .c2-header h3 { font-size: 14px; font-weight: 600; }
+  .c2-controls { display: flex; gap: 8px; }
+  .c2-controls button {
+    font-size: 11px; padding: 5px 14px; border: 1px solid var(--border);
+    border-radius: 6px; background: none; color: var(--text); cursor: pointer;
+    font-family: inherit; transition: all .2s;
+  }
+  .c2-controls button:hover { opacity: 0.85; }
+  .c2-btn-start { border-color: var(--ok) !important; color: var(--ok) !important; }
+  .c2-btn-start:hover { background: var(--ok); color: #000 !important; }
+  .c2-btn-stop { border-color: var(--danger) !important; color: var(--danger) !important; }
+  .c2-btn-stop:hover { background: var(--danger); color: #000 !important; }
+  .c2-btn-clear { border-color: var(--warn) !important; color: var(--warn) !important; }
+  .c2-btn-clear:hover { background: var(--warn); color: #000 !important; }
+  .c2-body { padding: 14px 20px; }
+  .c2-info { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; }
+  .c2-info code { color: var(--accent); background: #39bae610; padding: 2px 6px; border-radius: 3px; }
+  .c2-host { font-size: 11px; color: var(--text-dim); padding: 4px 0; border-bottom: 1px solid #ffffff05; display: flex; justify-content: space-between; }
+  .c2-host .time { color: var(--text-dim); }
+  .c2-empty { font-size: 12px; color: var(--text-dim); text-align: center; padding: 10px; }
+
+  /* ── Phishing Card ── */
+  .phish-card {
+    background: var(--card-a); border: 1px solid var(--accent); border-radius: 10px;
+    padding: 18px 20px; margin-top: 12px; display: none;
+  }
+  .phish-card.show { display: block; }
+  .phish-card h4 { font-size: 13px; margin-bottom: 10px; color: var(--accent); }
+  .phish-field { margin-bottom: 10px; }
+  .phish-field .label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+  .phish-field .value { font-size: 12px; color: var(--text); background: var(--bg); padding: 8px 10px; border-radius: 6px; white-space: pre-wrap; border: 1px solid var(--border); max-height: 120px; overflow-y: auto; }
+  .phish-field code.value { display: block; font-family: "SF Mono", "Consolas", monospace; font-size: 11px; }
 </style>
 </head>
 <body>
@@ -208,10 +252,42 @@
     <div class="progress-body" id="progressBody">
       <div class="phase-bar" id="phaseBar"></div>
       <div id="logArea"></div>
+      <!-- 钓鱼邮件/附件展示 -->
+      <div class="phish-card" id="phishCard">
+        <h4>📧 钓鱼邮件 & 宏附件</h4>
+        <div class="phish-field"><div class="label">邮件主题</div><div class="value" id="phishSubject">—</div></div>
+        <div class="phish-field"><div class="label">邮件正文</div><div class="value" id="phishBody">—</div></div>
+        <div class="phish-field"><div class="label">附件名称</div><div class="value" id="phishAttach">—</div></div>
+        <div class="phish-field"><div class="label">C2 回调地址</div><code class="value" id="phishC2">—</code></div>
+        <div class="phish-field"><div class="label">VBA 宏代码 (前2000字)</div><code class="value" id="phishMacro">—</code></div>
+        <div id="phishDownloads" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"></div>
+      </div>
+
       <div class="awareness-bar" id="awarenessBar" style="display:none">
         <div class="awareness-label">蓝队感知度: <span id="awarenessVal">0/100</span></div>
         <div class="awareness-track"><div class="awareness-fill" id="awarenessFill"></div></div>
       </div>
+    </div>
+  </div>
+
+  <!-- C2 监听器 -->
+  <div class="section-title">🎯 C2 监听器（社工钓鱼回传）</div>
+  <div class="c2-panel">
+    <div class="c2-header">
+      <h3>
+        <span id="c2StatusBadge" style="color:var(--text-dim)">● 未启动</span>
+      </h3>
+      <div class="c2-controls">
+        <button class="c2-btn-start" id="c2StartBtn" onclick="c2Start()">▶ 启动</button>
+        <button class="c2-btn-stop" id="c2StopBtn" onclick="c2Stop()" disabled>■ 停止</button>
+        <button class="c2-btn-clear" id="c2ClearBtn" onclick="c2Clear()">✕ 清空</button>
+      </div>
+    </div>
+    <div class="c2-body">
+      <div class="c2-info" id="c2Info" style="display:none">
+        回调地址: <code id="c2CaptureUrl">—</code>&nbsp;&nbsp;Payload: <code id="c2PayloadUrl">—</code>
+      </div>
+      <div id="c2Hosts"><div class="c2-empty">— 暂无捕获 —</div></div>
     </div>
   </div>
 
@@ -256,7 +332,7 @@ function escapeHtml(s) {
 const PHASE_ORDER = {
   'firewall_breach': ['recon','initial_access','persistence','lateral'],
   'supply_chain': ['recon','initial_access','lateral','cross_target'],
-  'phishing': ['recon','social_eng','persistence','lateral'],
+  'phishing': ['social_eng'],
 };
 
 const PHASE_LABELS_MAP = {
@@ -362,6 +438,43 @@ function connectSSE(jobId) {
       case 'log':
         logArea.innerHTML += '<div class="log-line">' + escapeHtml(ev.data.text) + '</div>';
         break;
+      case 'phishing':
+        document.getElementById('phishCard').classList.add('show');
+        document.getElementById('phishSubject').textContent = ev.data.email_subject || '(LLM 动态生成)';
+        document.getElementById('phishBody').textContent = ev.data.email_body || '(LLM 动态生成)';
+        document.getElementById('phishAttach').textContent = ev.data.attachment_name || '—';
+        document.getElementById('phishC2').textContent = ev.data.c2_url || '—';
+        document.getElementById('phishMacro').textContent = ev.data.macro_code || '(LLM 动态生成)';
+        // 下载按钮
+        const dlDiv = document.getElementById('phishDownloads');
+        dlDiv.innerHTML = '';
+        // 打包下载 (主按钮)
+        const zipBtn = document.createElement('button');
+        zipBtn.textContent = '📦 一键打包下载 (含使用说明)';
+        zipBtn.style.cssText = 'font-size:12px;padding:7px 18px;border:1px solid var(--accent2);border-radius:6px;background:var(--accent2);color:#000;cursor:pointer;font-family:inherit;font-weight:600;transition:all .2s';
+        zipBtn.onmouseenter = function(){ this.style.opacity='0.85'; };
+        zipBtn.onmouseleave = function(){ this.style.opacity='1'; };
+        zipBtn.onclick = function(){ downloadFile('zip'); };
+        dlDiv.appendChild(zipBtn);
+        // 分隔线
+        dlDiv.appendChild(document.createTextNode(' '));
+        const files = [
+          {type:'email', label:'📩 邮件 .txt', cls:'var(--accent)'},
+          {type:'attachment', label:'📎 附件 .xlsm', cls:'var(--accent2)'},
+          {type:'vba', label:'📝 宏代码 .vba.txt', cls:'var(--ok)'},
+        ];
+        files.forEach(f => {
+          const btn = document.createElement('button');
+          btn.textContent = f.label;
+          btn.style.cssText = 'font-size:11px;padding:5px 12px;border:1px solid ' + f.cls
+            + ';border-radius:6px;background:none;color:' + f.cls
+            + ';cursor:pointer;font-family:inherit;transition:all .2s';
+          btn.onmouseenter = function(){ this.style.background = f.cls; this.style.color = '#000'; };
+          btn.onmouseleave = function(){ this.style.background = 'none'; this.style.color = f.cls; };
+          btn.onclick = function(){ downloadFile(f.type); };
+          dlDiv.appendChild(btn);
+        });
+        break;
       case 'done':
         stopTicker();
         document.getElementById('taskStatus').textContent = '已完成';
@@ -423,6 +536,16 @@ function showReport() {
 }
 function closeReport(e) { if (!e || e.target.id === 'reportOverlay') document.getElementById('reportOverlay').classList.remove('show'); }
 
+function downloadFile(fileType) {
+  if (!currentJob) return;
+  const a = document.createElement('a');
+  a.href = '/api/apt/download/' + currentJob + '/' + fileType;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
 // ── 历史记录 ──
 function loadHistory() {
   fetch('/api/apt/history')
@@ -432,9 +555,34 @@ function loadHistory() {
       if (!items || items.length === 0) { tbody.innerHTML = '<tr><td colspan="5" class="empty-state">暂无记录</td></tr>'; return; }
       tbody.innerHTML = items.map(item => {
         const statusDot = item.status === 'running' ? 'running' : item.status === 'done' ? 'done' : 'failed';
-        return '<tr><td>' + escapeHtml(item.started) + '</td><td>' + escapeHtml(item.vector) + '</td><td>' + escapeHtml(item.target) + '</td><td>' + escapeHtml(item.mode) + '</td><td><span class="dot ' + statusDot + '"></span>' + item.status + '</td></tr>';
+        const clickable = item.status === 'done' ? 'clickable' : '';
+        return '<tr class="' + clickable + '" data-job-id="' + escapeHtml(item.job_id) + '"' + (clickable ? ' title="点击查看报告"' : '') + '>' +
+               '<td>' + escapeHtml(item.started) + '</td>' +
+               '<td>' + escapeHtml(item.vector) + '</td>' +
+               '<td>' + escapeHtml(item.target) + '</td>' +
+               '<td>' + escapeHtml(item.mode) + '</td>' +
+               '<td><span class="dot ' + statusDot + '"></span>' + item.status + '</td></tr>';
       }).join('');
+      // 绑定点击事件
+      tbody.querySelectorAll('tr.clickable').forEach(row => {
+        row.addEventListener('click', function() {
+          const jobId = this.getAttribute('data-job-id');
+          showHistoryReport(jobId);
+        });
+      });
     });
+}
+
+function showHistoryReport(jobId) {
+  fetch('/api/apt/report/' + jobId)
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) { alert(data.error); return; }
+      document.getElementById('reportTitle').textContent = 'APT 攻击模拟报告 - ' + data.target;
+      document.getElementById('reportContent').textContent = data.report;
+      document.getElementById('reportOverlay').classList.add('show');
+    })
+    .catch(err => alert('获取报告失败: ' + err));
 }
 
 function resetButtons() {
@@ -445,6 +593,59 @@ function resetButtons() {
     b.disabled = false;
   });
 }
+
+// ── C2 监听器 ──
+function c2Start() {
+  fetch('/api/c2/start', { method: 'POST' })
+    .then(r => r.json())
+    .then(d => {
+      if (d.status === 'started' || d.status === 'already_running') {
+        document.getElementById('c2StatusBadge').innerHTML = '<span style="color:var(--ok)">● 运行中</span>';
+        document.getElementById('c2StartBtn').disabled = true;
+        document.getElementById('c2StopBtn').disabled = false;
+        document.getElementById('c2Info').style.display = '';
+        c2RefreshStatus();
+      }
+    });
+}
+function c2Stop() {
+  fetch('/api/c2/stop', { method: 'POST' })
+    .then(r => r.json())
+    .then(d => {
+      document.getElementById('c2StatusBadge').innerHTML = '<span style="color:var(--text-dim)">● 已停止</span>';
+      document.getElementById('c2StartBtn').disabled = false;
+      document.getElementById('c2StopBtn').disabled = true;
+    });
+}
+function c2Clear() {
+  fetch('/api/c2/clear', { method: 'POST' })
+    .then(() => { document.getElementById('c2Hosts').innerHTML = '<div class="c2-empty">— 暂无捕获 —</div>'; });
+}
+function c2RefreshStatus() {
+  fetch('/api/c2/status')
+    .then(r => r.json())
+    .then(d => {
+      if (d.running) {
+        document.getElementById('c2StatusBadge').innerHTML = '<span style="color:var(--ok)">● 运行中</span>';
+        document.getElementById('c2StartBtn').disabled = true;
+        document.getElementById('c2StopBtn').disabled = false;
+        document.getElementById('c2Info').style.display = '';
+        document.getElementById('c2CaptureUrl').textContent = d.capture_url;
+        document.getElementById('c2PayloadUrl').textContent = d.payload_url;
+      }
+      if (d.captured_hosts && d.captured_hosts.length > 0) {
+        document.getElementById('c2Hosts').innerHTML = d.captured_hosts.map(h =>
+          '<div class="c2-host"><span><b>' + escapeHtml(h.hostname || '?') + '</b>'
+          + ' \ ' + escapeHtml(h.username || '?')
+          + ' (' + escapeHtml(h.internal_ip || '?') + ')'
+          + '</span><span class="time">' + escapeHtml(h.timestamp || '') + '</span></div>'
+        ).join('');
+      }
+    });
+}
+// 每 5s 刷新 C2 状态
+c2RefreshStatus();
+setInterval(c2RefreshStatus, 5000);
 
 // ── 页面加载 ──
 toggleMode();

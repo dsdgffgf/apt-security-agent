@@ -41,6 +41,12 @@ APT_TOOLS = [
     "hash_crack",
     # Cross-phase tools from pentest modules
     "dir_enum", "web_fingerprint", "port_scan", "service_detect",
+    # ── 改进: 社工钓鱼 — 宏附件生成 ──
+    "generate_macro_doc",
+    # ── 改进: 横向移动 — 多技术 ──
+    "apt_psexec", "apt_wmi_exec", "apt_schtasks",
+    "apt_pass_the_hash", "apt_ssh_key_reuse",
+    "apt_internal_scan",
 ]
 
 QWEN_TOOL_NAMES = TOOL_NAMES
@@ -444,6 +450,68 @@ def _make_qwen_tool_class(tool_name: str, base_tool_cls):
         parameters = [
             {"name": "hashes", "type": "array", "description": "hash_extract 输出的 hash 列表，或包含 hash 的文本内容", "required": True},
         ]
+    # ── 改进: 社工钓鱼 — 宏附件生成 ──
+    elif tool_name == "generate_macro_doc":
+        parameters = [
+            {"name": "target_name", "type": "string", "description": "目标组织名称（用于伪装文档标题）", "required": True},
+            {"name": "c2_url", "type": "string", "description": "C2 回调 URL (如 http://<ip>:8080/capture)", "required": True},
+            {"name": "output_path", "type": "string", "description": "输出文件路径（可选，不传则返回宏代码文本）", "required": False},
+            {"name": "attachment_type", "type": "string", "description": "附件类型: xlsm 或 docm（默认 xlsm）", "required": False},
+        ]
+    # ── 改进: 横向移动 — 多技术 ──
+    elif tool_name == "apt_psexec":
+        parameters = [
+            {"name": "host", "type": "string", "description": "跳板机 IP", "required": True},
+            {"name": "username", "type": "string", "description": "跳板机用户名", "required": True},
+            {"name": "password", "type": "string", "description": "跳板机密码", "required": True},
+            {"name": "target_host", "type": "string", "description": "远程目标（内网机器）IP", "required": True},
+            {"name": "command", "type": "string", "description": "要执行的命令（默认 whoami）", "required": False},
+            {"name": "domain", "type": "string", "description": "域（可选）", "required": False},
+        ]
+    elif tool_name == "apt_wmi_exec":
+        parameters = [
+            {"name": "host", "type": "string", "description": "跳板机 IP", "required": True},
+            {"name": "username", "type": "string", "description": "跳板机用户名", "required": True},
+            {"name": "password", "type": "string", "description": "跳板机密码", "required": True},
+            {"name": "target_host", "type": "string", "description": "远程目标（内网机器）IP", "required": True},
+            {"name": "command", "type": "string", "description": "要执行的命令（默认 cmd /c whoami）", "required": False},
+            {"name": "domain", "type": "string", "description": "域（可选）", "required": False},
+        ]
+    elif tool_name == "apt_schtasks":
+        parameters = [
+            {"name": "host", "type": "string", "description": "跳板机 IP", "required": True},
+            {"name": "username", "type": "string", "description": "跳板机用户名", "required": True},
+            {"name": "password", "type": "string", "description": "跳板机密码", "required": True},
+            {"name": "target_host", "type": "string", "description": "远程目标（内网机器）IP", "required": True},
+            {"name": "command", "type": "string", "description": "要执行的命令", "required": False},
+            {"name": "task_name", "type": "string", "description": "计划任务名称（默认 WindowsUpdate）", "required": False},
+        ]
+    elif tool_name == "apt_pass_the_hash":
+        parameters = [
+            {"name": "host", "type": "string", "description": "攻击发起机器 IP", "required": True},
+            {"name": "nt_hash", "type": "string", "description": "NTLM Hash (32位十六进制)", "required": True},
+            {"name": "target_host", "type": "string", "description": "目标机器 IP", "required": True},
+            {"name": "command", "type": "string", "description": "要执行的命令（默认 whoami）", "required": False},
+            {"name": "username", "type": "string", "description": "目标用户名（默认 Administrator）", "required": False},
+            {"name": "domain", "type": "string", "description": "域（可选）", "required": False},
+        ]
+    elif tool_name == "apt_ssh_key_reuse":
+        parameters = [
+            {"name": "host", "type": "string", "description": "已控跳板 IP", "required": True},
+            {"name": "username", "type": "string", "description": "跳板用户名", "required": True},
+            {"name": "password", "type": "string", "description": "跳板密码（可选）", "required": False},
+            {"name": "target_host", "type": "string", "description": "内网目标 IP", "required": True},
+            {"name": "key_path", "type": "string", "description": "私钥路径（跳板上的路径）", "required": False},
+            {"name": "target_user", "type": "string", "description": "目标用户名", "required": False},
+        ]
+    elif tool_name == "apt_internal_scan":
+        parameters = [
+            {"name": "host", "type": "string", "description": "已控跳板 IP", "required": True},
+            {"name": "username", "type": "string", "description": "跳板用户名", "required": True},
+            {"name": "password", "type": "string", "description": "跳板密码", "required": True},
+            {"name": "subnet", "type": "string", "description": "要扫描的子网 (如 192.168.1.0/24)", "required": True},
+            {"name": "ports", "type": "string", "description": "要扫描的端口 (如 22,80,443,445,3389)", "required": False},
+        ]
     else:
         raise ValueError(f"Unsupported Qwen tool: {tool_name}")
 
@@ -514,6 +582,15 @@ def _tool_description(tool_name: str) -> str:
         "web_login_brute": "Web 登录爆破工具。专门用于 HTTP Basic Auth、表单登录和 UA+密码组合认证的定向爆破。与 apt_credential_attack（侧重 SSH/FTP/SMB）不同，本工具只针对 Web 认证。支持三种方式：(1)Authorization Basic 头 (2)POST username+password 表单 (3)User-Agent + 密码参数组合。适用场景：发现有效用户名/codename 后批量测试弱口令。",
         "hash_extract": "从文本内容中提取密码 hash（MD5/SHA1/SHA256/SHA512/NTLM/Linux shadow）。自动识别常见 hash 格式，返回 hash 类型和值列表。适用于分析从目标获取的 /etc/shadow、配置文件、数据库导出等文件中的密码 hash。",
         "hash_crack": "对提取的 hash 执行密码破解。自动识别 hash 类型并使用内置字典 + 常见变换规则尝试破解。支持 MD5/SHA1/SHA256/SHA512/NTLM 的字典攻击。如果系统安装了 John the Ripper，也会自动调用进行 shadow 格式破解。",
+        # ── 改进: 社工钓鱼 — 宏附件生成 ──
+        "generate_macro_doc": "生成带 VBA 宏的 Office 文档（.xlsm / .docm）。宏功能（无害）：获取主机名、用户名、内网 IP，通过 HTTP POST 回传至 C2 服务器，执行无害命令证明代码执行。适用于社工钓鱼场景的附件生成。",
+        # ── 改进: 横向移动 — 多技术 ──
+        "apt_psexec": "PsExec 远程执行 — 通过 SMB 在内网目标主机执行命令。使用 impacket-psexec 实现，需要目标的管理员权限。",
+        "apt_wmi_exec": "WMI 远程执行 — 通过 Windows WMI 在内网目标主机执行命令。使用 impacket-wmiexec 实现。",
+        "apt_schtasks": "计划任务远程执行 — 在目标主机创建/运行计划任务（Windows schtasks / Linux cron）。支持自动清理创建的任务。",
+        "apt_pass_the_hash": "哈希传递攻击 — 使用 NTLM Hash 而非明文密码认证远程主机。使用 impacket-psexec -hashes 实现。需要有效的 NTLM Hash（32位十六进制）。",
+        "apt_ssh_key_reuse": "SSH 私钥复用 — 利用已获取的 SSH 私钥登录其他内网主机。支持从跳板查找私钥并尝试免密登录。",
+        "apt_internal_scan": "内网资产发现 — 从已控跳板扫描内网存活主机和服务端口。优先使用 nmap（SSH远程执行），不可用时回退到 Python socket 本地扫描。",
     }
     return descriptions[tool_name]
 

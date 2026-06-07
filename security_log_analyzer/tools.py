@@ -35,6 +35,7 @@ from .apt_tools import (
     osint_recon,
     osint_social_recon,
     osint_tech_recon,
+    generate_macro_doc,
     se_conversation_gen,
     se_phishing_gen,
     web_content_fetch,
@@ -87,6 +88,7 @@ TOOL_NAMES = [
     "osint_social_recon",
     "se_phishing_gen",
     "se_conversation_gen",
+    "generate_macro_doc",
     "apt_boundary_scan",
     "apt_exploit_plan",
     "apt_persistence_plan",
@@ -312,6 +314,15 @@ def _hdl_phishing(params):
 @_register("se_conversation_gen")
 def _hdl_conversation(params):
     return se_conversation_gen(params.get("context", {}))
+
+@_register("generate_macro_doc")
+def _hdl_generate_macro(params):
+    return generate_macro_doc(
+        target_name=params.get("target_name", ""),
+        c2_url=params.get("c2_url", ""),
+        output_path=params.get("output_path", ""),
+        attachment_type=params.get("attachment_type", "xlsm"),
+    )
 
 
 # ── APT tools ────────────────────────────────────────

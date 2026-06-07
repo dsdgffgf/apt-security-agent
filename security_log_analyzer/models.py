@@ -184,6 +184,48 @@ class AptTarget:
 
 
 @dataclass(slots=True)
+class PlanStep:
+    """攻击方案中的单步操作"""
+    tool: str                                              # 工具名称
+    params: dict[str, Any] = field(default_factory=dict)   # 工具参数
+    order: int = 0                                         # 执行顺序
+    on_failure: str = "abort"                              # 失败策略: abort/continue/fallback
+    fallback_tool: str = ""                                # 降级工具名
+    fallback_params: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class AttackPlan:
+    """LLM 生成的动态攻击方案"""
+    plan_id: str = ""
+    target_signature: str = ""                             # 目标特征签名
+    phases: dict[str, list[PlanStep]] = field(default_factory=dict)  # 阶段→步骤列表
+    rationale: str = ""                                    # 方案理由
+    created_at: str = ""
+
+
+@dataclass(slots=True)
+class ToolCacheEntry:
+    """工具缓存条目 — 基于签名复用已生成的工具代码"""
+    signature: str
+    tool_name: str
+    tool_code: str = ""                                    # 动态生成的工具代码
+    tool_params: dict[str, Any] = field(default_factory=dict)
+    created_at: str = ""
+    hit_count: int = 0
+
+
+@dataclass(slots=True)
+class PhishingCallback:
+    """C2 回调记录 — 钓鱼宏回传的主机信息"""
+    hostname: str = ""
+    username: str = ""
+    internal_ip: str = ""
+    timestamp: str = ""
+    raw_data: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class AptPhaseResult:
     """单阶段执行结果"""
     phase: AptPhase
@@ -206,6 +248,12 @@ class AptSimulationState:
     kill_chain: list[dict] = field(default_factory=list)
     start_time: str = ""
     notes: dict[str, Any] = field(default_factory=dict)
+    # ── 改进1: 攻击方案 ──
+    attack_plan: AttackPlan | None = None
+    # ── 改进1: 工具缓存 (signature → ToolCacheEntry) ──
+    tool_cache: dict[str, ToolCacheEntry] = field(default_factory=dict)
+    # ── 改进3: 钓鱼回调记录 ──
+    phishing_callbacks: list[PhishingCallback] = field(default_factory=list)
 
 
 @dataclass(slots=True)

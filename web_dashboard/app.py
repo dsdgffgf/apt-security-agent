@@ -76,6 +76,9 @@ class EventCollector:
     def emit_log(self, text: str) -> None:
         self.emit("log", {"text": text.strip()})
 
+    def emit_phishing(self, data: dict) -> None:
+        self.emit("phishing", data)
+
     def emit_error(self, text: str) -> None:
         self.emit("error", {"text": text})
 
@@ -155,10 +158,18 @@ def _run_with_event_hooks(
             resume = False
 
     if not resume:
-        target = {"id": f"target_{uuid.uuid4().hex[:6]}", "host": target_host, "vector": vector}
+        target: dict[str, Any] = {"id": f"target_{uuid.uuid4().hex[:6]}", "host": target_host, "vector": vector}
         if cross_host and vector == "supply_chain":
             target["cross_host"] = cross_host
             target["cross_id"] = f"cross_{uuid.uuid4().hex[:4]}"
+        # ── 改进: phishing 模式注入 C2 配置 ──
+        if vector == "phishing":
+            from security_log_analyzer.c2_listener import get_local_ip
+            from security_log_analyzer.config import C2_PORT
+            _local_ip = get_local_ip()
+            target["c2_url"] = f"http://{_local_ip}:{C2_PORT}/capture"
+            target["c2_payload_url"] = f"http://{_local_ip}:{C2_PORT}/payload.ps1"
+            collector.emit_log(f"[C2] 回调地址: {target['c2_url']}")
         state = build_initial_state(target)
         phases = VECTOR_PHASES.get(vector, VECTOR_PHASES["firewall_breach"])
 
@@ -192,6 +203,26 @@ def _run_with_event_hooks(
             collector.emit_log(f"{icon} {result.get('summary', '完成')}")
             collector.emit_phase_done(phase, result.get("summary", ""), result.get("findings", []),
                                       elapsed=_elapsed, cumulative=_cumul)
+            # 社工钓鱼阶段：发送钓鱼邮件/附件内容到前端
+            if phase == AptPhase.SOCIAL_ENG:
+                _macro = result.get("macro_result", {}) or {}
+                _email_path = result.get("email_path", "")
+                _xlsm_path = result.get("attachment_path", "") or _macro.get("output_path", "")
+                _vba_path = result.get("vba_path", "") or _xlsm_path.replace(".xlsm", ".vba.txt") if _xlsm_path else ""
+                collector.emit_phishing({
+                    "email_subject": result.get("email_subject", ""),
+                    "email_body": result.get("email_body", ""),
+                    "attachment_name": result.get("attachment_name", ""),
+                    "attachment_path": _xlsm_path,
+                    "c2_url": result.get("c2_url", ""),
+                    "macro_code": result.get("macro_code", _macro.get("macro_code", ""))[:2000],
+                    "email_path": _email_path,
+                    "vba_path": _vba_path,
+                    "zip_path": result.get("zip_path", ""),
+                })
+                collector.emit_log(f"[钓鱼附件] {result.get('attachment_name', '')} → {_xlsm_path}")
+                collector.emit_log(f"[钓鱼邮件] 已保存 → {_email_path}")
+                collector.emit_log(f"[C2回调] {result.get('c2_url', '')}")
             save_checkpoint(state, _phase_timings)
         except SecurityAgentError as exc:
             _phase_timings[phase.value] = _time.monotonic() - _t0
@@ -364,6 +395,56 @@ def api_apt_report(job_id: str) -> Response:
     })
 
 
+@app.route("/api/apt/download/<job_id>/<file_type>")
+def api_apt_download(job_id: str, file_type: str) -> Any:
+    """下载钓鱼攻击生成的文件（邮件/附件/VBA）"""
+    from flask import send_file
+
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "任务不存在"}), 404
+
+    events = job.get("events", [])
+    phishing_data: dict = {}
+    for ev in events:
+        if ev.get("type") == "phishing":
+            phishing_data = ev.get("data", {})
+            break
+
+    file_path = ""
+    download_name = ""
+    if file_type == "email":
+        file_path = phishing_data.get("email_path", "")
+        download_name = "phishing_email.txt"
+    elif file_type == "attachment":
+        file_path = phishing_data.get("attachment_path", "")
+        download_name = phishing_data.get("attachment_name", "attachment.xlsm")
+    elif file_type == "vba":
+        file_path = phishing_data.get("vba_path", "")
+        download_name = "macro_code.vba.txt"
+    elif file_type == "zip":
+        file_path = phishing_data.get("zip_path", "")
+        download_name = "phishing_package.zip"
+
+    if not file_path:
+        return jsonify({"error": f"文件类型 {file_type} 不存在"}), 404
+
+    path = Path(file_path)
+    if not path.exists():
+        return jsonify({"error": f"文件不存在: {file_path}"}), 404
+
+    try:
+        return send_file(
+            str(path),
+            as_attachment=True,
+            download_name=download_name,
+            mimetype="application/octet-stream",
+        )
+    except Exception as exc:
+        return jsonify({"error": f"文件读取失败: {exc}"}), 500
+
+
 @app.route("/api/apt/history")
 def api_apt_history() -> Response:
     items = []
@@ -381,6 +462,75 @@ def api_apt_history() -> Response:
     return jsonify(items)
 
 
+# ── C2 监听器控制 ──────────────────────────────────────────
+
+_c2_server: Any = None
+_c2_thread: Any = None
+
+
+@app.route("/api/c2/status")
+def api_c2_status() -> Response:
+    """返回 C2 监听器状态 + 已捕获主机列表"""
+    from security_log_analyzer.c2_listener import captured_hosts, get_local_ip
+    from security_log_analyzer.config import C2_PORT
+    return jsonify({
+        "running": _c2_server is not None and _c2_thread is not None and _c2_thread.is_alive(),
+        "host": get_local_ip(),
+        "port": C2_PORT,
+        "capture_url": f"http://{get_local_ip()}:{C2_PORT}/capture",
+        "payload_url": f"http://{get_local_ip()}:{C2_PORT}/payload.ps1",
+        "captured_count": len(captured_hosts),
+        "captured_hosts": list(captured_hosts)[-20:],
+    })
+
+
+@app.route("/api/c2/start", methods=["POST"])
+def api_c2_start() -> Response:
+    """启动 C2 监听器（后台线程）"""
+    global _c2_server, _c2_thread
+    from security_log_analyzer.c2_listener import start_c2_background
+    from security_log_analyzer.config import C2_HOST, C2_PORT
+
+    if _c2_server is not None and _c2_thread is not None and _c2_thread.is_alive():
+        return jsonify({"status": "already_running", "port": C2_PORT})
+
+    try:
+        _c2_server, _c2_thread = start_c2_background(host=C2_HOST, port=C2_PORT)
+        return jsonify({"status": "started", "host": C2_HOST, "port": C2_PORT})
+    except Exception as exc:
+        return jsonify({"status": "error", "error": str(exc)}), 500
+
+
+@app.route("/api/c2/stop", methods=["POST"])
+def api_c2_stop() -> Response:
+    """停止 C2 监听器"""
+    global _c2_server, _c2_thread
+    from security_log_analyzer.c2_listener import captured_hosts
+
+    if _c2_server is None:
+        return jsonify({"status": "not_running"})
+
+    try:
+        _c2_server.shutdown()
+        _c2_server = None
+        _c2_thread = None
+        return jsonify({"status": "stopped", "captured_total": len(captured_hosts)})
+    except Exception as exc:
+        return jsonify({"status": "error", "error": str(exc)}), 500
+
+
+@app.route("/api/c2/clear", methods=["POST"])
+def api_c2_clear() -> Response:
+    """清空 C2 回调记录"""
+    from security_log_analyzer.c2_listener import clear_captured_hosts
+    clear_captured_hosts()
+    return jsonify({"status": "cleared"})
+
+
 if __name__ == "__main__":
-    from waitress import serve
-    serve(app, host="127.0.0.1", port=5000, threads=8)
+    import sys
+    if "--waitress" in sys.argv:
+        from waitress import serve
+        serve(app, host="127.0.0.1", port=5000, threads=8)
+    else:
+        app.run(host="127.0.0.1", port=5000, threaded=True, debug=False)

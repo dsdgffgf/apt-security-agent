@@ -29,6 +29,14 @@ MODE_MODEL_MAP: dict[str, str] = {
     "defense": DEEPSEEK_FLASH_MODEL,      # 日志分析 → Flash
 }
 
+# ── C2 监听器配置（社工钓鱼）────────────────────────────
+C2_HOST = os.getenv("C2_HOST", "0.0.0.0")
+C2_PORT = int(os.getenv("C2_PORT", "8080"))
+C2_ENABLED = os.getenv("C2_ENABLED", "true").lower() in ("1", "true", "yes")
+C2_CAPTURE_ENDPOINT = os.getenv("C2_CAPTURE_ENDPOINT", "/capture")
+C2_PAYLOAD_ENDPOINT = os.getenv("C2_PAYLOAD_ENDPOINT", "/payload.ps1")
+
+
 # MiMo configuration (legacy fallback)
 MIMO_DEFAULT_MODEL = "mimo-v2.5-pro"
 MIMO_PAYG_BASE_URL = "https://api.xiaomimimo.com/anthropic"
